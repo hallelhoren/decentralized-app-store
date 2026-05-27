@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import AppList, { AppData } from "../components/AppList";
 import AppDetails from "../components/AppDetails";
 import UserProfile from "../components/UserProfile";
@@ -18,13 +18,22 @@ export default function Home() {
   const [activeTab, setActiveTab] = useState<"profile" | "store" | "dev">("profile");
   
   // States
-  const [allApps, setAllApps] = useState<AppData[]>(INITIAL_STORE_APPS);
+  const [allApps, setAllApps] = useState([]);
   const [myApps, setMyApps] = useState<AppData[]>([]);
   const [storeSelectedApp, setStoreSelectedApp] = useState<AppData | null>(null);
   const [devSelectedApp, setDevSelectedApp] = useState<AppData | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const [commentsMap, setCommentsMap] = useState<Record<string, AppComment[]>>({});
+  
+  
+  useEffect(() => {
+    // Fetch apps from the backend instead of using the hardcoded constant
+    fetch('/api/apps')
+      .then(res => res.json())
+      .then(data => setAllApps(data))
+      .catch(err => console.error("Failed to fetch apps:", err));
+  }, []);
 
   // Recalculate rating whenever comments change
   const getUpdatedRating = (appId: string, currentRating: number, newComments: AppComment[]): number => {
