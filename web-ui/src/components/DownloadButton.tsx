@@ -28,6 +28,8 @@ export default function DownloadButton({ appId }: { appId: string }) {
       // 3. Pass the appId in the query string
       const res = await fetch(`/api/status?appId=${encodeURIComponent(appId)}`);
       const data = await res.json();
+
+      console.log("Frontend received:", data); // Check if this logs numbers > 0
       
       setProgress(data.progress);
       
