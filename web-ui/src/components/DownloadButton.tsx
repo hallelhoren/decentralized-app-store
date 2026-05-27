@@ -1,6 +1,9 @@
 "use client";
 import { useState } from "react";
 
+
+
+
 export default function DownloadButton({ appId }: { appId: string }) {
   const [progress, setProgress] = useState(0);
   const [status, setStatus] = useState<'idle' | 'in_progress' | 'finished'>('idle');
@@ -20,7 +23,7 @@ export default function DownloadButton({ appId }: { appId: string }) {
       body: JSON.stringify({ appId }), 
       headers: { "Content-Type": "application/json" }
     });
-
+    
     const interval = setInterval(async () => {
       // 3. Pass the appId in the query string
       const res = await fetch(`/api/status?appId=${encodeURIComponent(appId)}`);
@@ -28,9 +31,10 @@ export default function DownloadButton({ appId }: { appId: string }) {
       
       setProgress(data.progress);
       
-      if (data.status === 'finished') {
+      if (data.status === 'finished'|| data.progress >= 100) {
         setStatus('finished');
         clearInterval(interval);
+        console.log(`Polling stopped for ${appId}`);
       }
     }, 1000);
   };
