@@ -1,104 +1,69 @@
 "use client";
+import { useState } from "react";
 
-// This component will handle the download button functionality for each app.
-// When the user clicks the download button, it will simulate a download process with a progress bar and display a success message once completed.
-
-import { useState, useEffect } from "react";
-
-export default function DownloadButton() {
-  const [status, setStatus] = useState<"idle" | "downloading" | "completed">("idle");
+export default function DownloadButton({ appId }: { appId: string }) {
   const [progress, setProgress] = useState(0);
+  const [status, setStatus] = useState<'idle' | 'in_progress' | 'finished'>('idle');
 
-  useEffect(() => {
-    let interval: NodeJS.Timeout;
-    if (status === "downloading") {
-      interval = setInterval(() => {
-        setProgress((prev) => {
-          if (prev >= 100) {
-            clearInterval(interval);
-            setStatus("completed");
-            return 100;
-          }
-          return prev + 10;
-        });
-      }, 120); // קצב התקדמות הבר
+  const startDownload = async () => {
+    // 1. Check if appId exists before doing anything
+    if (!appId) {
+      console.error("DownloadButton: appId is missing!");
+      return;
     }
-    return () => clearInterval(interval);
-  }, [status]);
 
-  const handleDownload = () => {
-    setStatus("downloading");
-    setProgress(0);
+    setStatus('in_progress');
+    
+    // 2. Pass the appId in the body
+    await fetch("/api/download", { 
+      method: "POST", 
+      body: JSON.stringify({ appId }), 
+      headers: { "Content-Type": "application/json" }
+    });
+
+    const interval = setInterval(async () => {
+      // 3. Pass the appId in the query string
+      const res = await fetch(`/api/status?appId=${encodeURIComponent(appId)}`);
+      const data = await res.json();
+      
+      setProgress(data.progress);
+      
+      if (data.status === 'finished') {
+        setStatus('finished');
+        clearInterval(interval);
+      }
+    }, 1000);
   };
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "8px", marginTop: "16px", width: "100%" }}>
-      {status === "idle" && (
-        <button
-          onClick={handleDownload}
-          style={{
-            backgroundColor: "#3b82f6",
-            color: "#ffffff",
-            border: "none",
-            padding: "12px 20px",
-            borderRadius: "8px",
-            fontWeight: "bold",
-            cursor: "pointer",
-            fontSize: "15px",
-          }}
+    <div className="w-64">
+      {status === 'idle' && (
+        <button 
+          onClick={startDownload}
+          className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-3 px-6 rounded-lg transition-all duration-200 shadow-lg hover:shadow-xl active:scale-95"
         >
-          Download dApp
+          Download App
         </button>
       )}
 
-      {status === "downloading" && (
-        <div style={{ width: "100%" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", color: "#94a3b8", fontSize: "14px", marginBottom: "6px" }}>
+      {status === 'in_progress' && (
+        <div className="space-y-2">
+          <div className="flex justify-between text-sm font-medium text-gray-700">
             <span>Downloading...</span>
             <span>{progress}%</span>
           </div>
-          <div style={{ width: "100%", backgroundColor: "#334155", height: "8px", borderRadius: "4px", overflow: "hidden" }}>
-            <div
-              style={{
-                width: `${progress}%`,
-                backgroundColor: "#3b82f6",
-                height: "100%",
-                transition: "width 0.1s linear",
-              }}
-            />
+          <div className="w-full bg-gray-200 rounded-full h-2.5 overflow-hidden">
+            <div 
+              className="bg-indigo-600 h-2.5 rounded-full transition-all duration-500 ease-out" 
+              style={{ width: `${progress}%` }}
+            ></div>
           </div>
         </div>
       )}
 
-      {status === "completed" && (
-        <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-          <div
-            style={{
-              backgroundColor: "rgba(16, 185, 129, 0.1)",
-              border: "1px solid #10b981",
-              color: "#10b981",
-              padding: "12px",
-              borderRadius: "8px",
-              fontSize: "14px",
-              fontWeight: "600",
-              textAlign: "center",
-            }}
-          >
-            ✓ ההורדה התבצעה בהצלחה!
-          </div>
-          <button
-            onClick={() => setStatus("idle")}
-            style={{
-              background: "none",
-              border: "none",
-              color: "#64748b",
-              cursor: "pointer",
-              fontSize: "12px",
-              textDecoration: "underline",
-            }}
-          >
-            Reset Download
-          </button>
+      {status === 'finished' && (
+        <div className="w-full bg-green-100 text-green-800 text-center font-bold py-3 px-6 rounded-lg border border-green-200">
+          ✓ Installed
         </div>
       )}
     </div>

@@ -33,7 +33,7 @@ export default function AppDetails({ app, onBack, comments, onAddComment }: AppD
         <div style={{ backgroundColor: "#0f172a", borderRadius: "8px", padding: "14px", fontSize: "12px", fontFamily: "monospace", color: "#64748b", border: "1px solid #1e293b", marginBottom: "28px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
           <span style={{ color: "#94a3b8", fontWeight: "bold" }}>Contract:</span> {app.contractAddress}
         </div>
-        <DownloadButton />
+        <DownloadButton appId={app.id} />
         
         <CommentsSection 
           comments={comments} 
