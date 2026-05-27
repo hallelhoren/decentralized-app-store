@@ -17,6 +17,7 @@ export async function GET(request: Request) {
   const startTime = activeDownloads.get(appId)!;
   const elapsed = (Date.now() - startTime) / 1000;
   const progress = Math.min(Math.floor(elapsed * 10), 100);
+  console.log(`Debug: AppId ${appId}, StartTime: ${startTime}, CurrentTime: ${Date.now()}`);
 
   if (progress >= 100) {
     activeDownloads.delete(appId);

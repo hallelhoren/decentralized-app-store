@@ -29,6 +29,20 @@ app.get('/api/apps', (req: Request, res: Response) => {
   res.json(APPS);
 });
 
+// New Upload Endpoint
+app.post('/api/upload', (req: Request, res: Response) => {
+  const newApp = {
+    id: Date.now().toString(), // Simple unique ID
+    ...req.body,
+    rating: 0,
+    version: "1.0.0"
+  };
+  
+  APPS.push(newApp); // Add to the "in-memory" list
+  console.log(`Backend: App ${newApp.name} added.`);
+  res.status(201).json(newApp);
+});
+
 const PORT = process.env.DESKTOP_API_PORT || 3001;
 app.listen(PORT, () => console.log(`Backend running on ${PORT}`));
 

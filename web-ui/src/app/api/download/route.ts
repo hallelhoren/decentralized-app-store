@@ -8,3 +8,4 @@ export async function POST(request: Request) {
   activeDownloads.set(appId, Date.now());
   return NextResponse.json({ status: "started" });
 }
+
