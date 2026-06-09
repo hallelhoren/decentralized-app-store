@@ -48,7 +48,7 @@ export default function DeveloperAppDetails({ app, onBack, onUpdateVersion, comm
         <div style={{ backgroundColor: "#0f172a", padding: "16px", borderRadius: "8px", border: "1px dashed #3b82f6", marginBottom: "24px" }}>
           <h4 style={{ margin: "0 0 16px 0", color: "#3b82f6" }}>Developer Actions</h4>
           <div style={{ display: "flex", gap: "16px", flexDirection: "column" }}>
-            <DownloadButton />
+            <DownloadButton appId={app.id} />
             {!showUpdateForm ? (
               <button onClick={() => setShowUpdateForm(true)} style={{ padding: "12px", borderRadius: "8px", border: "1px solid #f59e0b", backgroundColor: "rgba(245, 158, 11, 0.1)", color: "#f59e0b", fontWeight: "bold", cursor: "pointer" }}>Upload New Version</button>
             ) : (
@@ -62,8 +62,9 @@ export default function DeveloperAppDetails({ app, onBack, onUpdateVersion, comm
         </div>
 
         <CommentsSection 
+          appId={app.id}
           comments={comments} 
-          onAddComment={(text) => onAddComment(text)} 
+          onReviewSubmitted={(text) => onAddComment(text)} 
           isDeveloperMode={true} 
         />
       </div>

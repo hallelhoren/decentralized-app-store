@@ -36,8 +36,9 @@ export default function AppDetails({ app, onBack, comments, onAddComment }: AppD
         <DownloadButton appId={app.id} />
         
         <CommentsSection 
+          appId={app.id}
           comments={comments} 
-          onAddComment={onAddComment} 
+          onReviewSubmitted={(text, rating) => onAddComment(text, rating)} 
           isDeveloperMode={false} 
         />
       </div>

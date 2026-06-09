@@ -15,22 +15,57 @@ export interface AppComment {
 }
 
 interface CommentsSectionProps {
+  appId: string;
   comments: AppComment[];
-  onAddComment: (text: string, rating?: number) => void;
+  onReviewSubmitted: (text: string, rating?: number) => void;
   isDeveloperMode: boolean;
 }
 
-export default function CommentsSection({ comments = [], onAddComment, isDeveloperMode }: CommentsSectionProps) {
+export default function CommentsSection({ appId, comments = [], onReviewSubmitted, isDeveloperMode }: CommentsSectionProps) {
   const [newComment, setNewComment] = useState("");
   const [rating, setRating] = useState(5);
+  const [isLoading, setIsLoading] = useState(false); 
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newComment.trim()) return;
-    onAddComment(newComment, isDeveloperMode ? undefined : rating);
-    setNewComment("");
-    setRating(5);
+
+    setIsLoading(true);
+
+    try {
+      // instead of directly updating the state, we send the new comment to the backend API
+      const response = await fetch("/api/reviews", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          appId,
+          rating: isDeveloperMode ? undefined : rating,
+          reviewText: newComment,
+          isDeveloper: isDeveloperMode,
+          reviewer: "0xUserAddress...", // in a real app, this would be the user's wallet address or username
+        }),
+      });
+
+      if (!response.ok) {
+        const errorBody = await response.json().catch(() => null);
+        throw new Error(errorBody?.error || "Failed to submit review");
+      }
+
+      // reset form and refresh comments
+      const submittedText = newComment;
+      const submittedRating = isDeveloperMode ? undefined : rating;
+      setNewComment("");
+      setRating(5);
+      onReviewSubmitted(submittedText, submittedRating); 
+    } catch (error) {
+      console.error("Error submitting review:", error);
+      const message = error instanceof Error ? error.message : "Failed to submit review.";
+      alert(message);
+    } finally {
+      setIsLoading(false);
+    }
   };
+
 
   // Sort comments: Developer comments always at the top, then newest first
   const sortedComments = [...comments].sort((a, b) => {
@@ -74,9 +109,22 @@ export default function CommentsSection({ comments = [], onAddComment, isDevelop
           style={{ width: "100%", padding: "12px", borderRadius: "8px", border: "1px solid #334155", backgroundColor: "#1e293b", color: "white", boxSizing: "border-box", marginBottom: "12px", resize: "vertical" }}
         />
         
-        <button type="submit" style={{ padding: "10px 20px", borderRadius: "8px", border: "none", backgroundColor: isDeveloperMode ? "#f59e0b" : "#3b82f6", color: "white", fontWeight: "bold", cursor: "pointer" }}>
-          {isDeveloperMode ? "Post Developer Update" : "Post Comment"}
-        </button>
+        <button 
+          type="submit" 
+          disabled={isLoading}
+          style={{ 
+            padding: "10px 20px", 
+            borderRadius: "8px", 
+            border: "none", 
+            backgroundColor: isDeveloperMode ? "#f59e0b" : "#3b82f6", 
+            color: "white", 
+            fontWeight: "bold", 
+            cursor: isLoading ? "not-allowed" : "pointer",
+            opacity: isLoading ? 0.7 : 1
+          }}
+        >
+          {isLoading ? "Submitting..." : (isDeveloperMode ? "Post Developer Update" : "Post Comment")}
+      </button>
       </form>
 
       {/* Comments List */}
