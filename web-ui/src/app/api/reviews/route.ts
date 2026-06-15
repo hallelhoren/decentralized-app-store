@@ -7,6 +7,28 @@ let mockReviewsCache: any[] = [];
 const AGGREGATION_THRESHOLD = 5; 
 
 
+export async function GET(request: Request) {
+  try {
+    const { searchParams } = new URL(request.url);
+    const appId = searchParams.get("appId");
+
+    // Check if the parameter exists
+    if (!appId) {
+      return new Response(JSON.stringify({ error: "Missing appId parameter" }), { status: 400 });
+    }
+
+    // Filter the internal array to match the requested appId
+    const appReviews = mockReviewsCache.filter((review: any) => review.appId === appId);
+
+    // Return the matched reviews safely
+    return new Response(JSON.stringify({ success: true, reviews: appReviews }), { status: 200 });
+  } catch (error) {
+    console.error("Error fetching reviews:", error);
+    return new Response(JSON.stringify({ error: "Internal Server Error" }), { status: 500 });
+  }
+}
+
+
 async function performAggregation() {
   console.log(`\n--- Threshold of ${AGGREGATION_THRESHOLD} reached! Starting automatic aggregation ---`);
 

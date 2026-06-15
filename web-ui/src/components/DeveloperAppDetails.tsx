@@ -13,10 +13,10 @@ interface DeveloperAppDetailsProps {
   onBack: () => void;
   onUpdateVersion: (id: string, newVersion: string) => void;
   comments: AppComment[];
-  onAddComment: (text: string) => void;
+  onReviewSubmitted: () => void;
 }
 
-export default function DeveloperAppDetails({ app, onBack, onUpdateVersion, comments, onAddComment }: DeveloperAppDetailsProps) {
+export default function DeveloperAppDetails({ app, onBack, onUpdateVersion, comments, onReviewSubmitted }: DeveloperAppDetailsProps) {
   const [showUpdateForm, setShowUpdateForm] = useState(false);
   const [newVersion, setNewVersion] = useState("");
 
@@ -64,7 +64,7 @@ export default function DeveloperAppDetails({ app, onBack, onUpdateVersion, comm
         <CommentsSection 
           appId={app.id}
           comments={comments} 
-          onReviewSubmitted={(text) => onAddComment(text)} 
+          onReviewSubmitted={onReviewSubmitted} 
           isDeveloperMode={true} 
         />
       </div>

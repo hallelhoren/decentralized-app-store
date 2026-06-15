@@ -1,6 +1,7 @@
 "use client";
-
-import { useState } from "react";
+import { ethers } from "ethers";
+import ContractABI from "../../../contracts/artifacts/contracts/DappStore.sol/DecentralizedAppStore.json";
+import { useEffect, useState } from "react";
 import AppList, { AppData } from "../components/AppList";
 import AppDetails from "../components/AppDetails";
 import UserProfile from "../components/UserProfile";
@@ -34,26 +35,93 @@ export default function Home() {
     return Number((sum / userReviews.length).toFixed(1));
   };
 
-  const handleAddComment = (appId: string, text: string, rating: number = 0, isDeveloper: boolean = false) => {
-    const newComment: AppComment = { id: Date.now().toString(), text, rating: isDeveloper ? undefined : rating, isDeveloper, timestamp: Date.now() };
-    
-    setCommentsMap(prev => {
-      const updatedComments = [...(prev[appId] || []), newComment];
+ // Safe fetch function with crash prevention
+  const fetchReviewsForApp = async (appId: string) => {
+    try {
+      const response = await fetch(`/api/reviews?appId=${appId}`);
       
-      // Update rating in allApps
-      setAllApps(apps => apps.map(a => a.id === appId ? { ...a, rating: getUpdatedRating(appId, a.rating, updatedComments) } : a));
-      // Update rating in myApps if applicable
-      setMyApps(apps => apps.map(a => a.id === appId ? { ...a, rating: getUpdatedRating(appId, a.rating, updatedComments) } : a));
-      
-      return { ...prev, [appId]: updatedComments };
-    });
+      // Check if response is valid
+      if (!response.ok) {
+        console.error("Server error or route not found:", response.status);
+        return;
+      }
+
+      // Read response as plain text first to prevent parse errors
+      const text = await response.text();
+      if (!text) {
+        return;
+      }
+
+      // Parse text to JSON safely
+      const data = JSON.parse(text);
+
+      if (data.success && data.reviews) {
+        const formattedComments: AppComment[] = data.reviews.map((r: any, index: number) => ({
+          id: `${r.timestamp}_${index}`,
+          text: r.reviewText,
+          rating: r.rating,
+          isDeveloper: r.isDeveloper || false,
+          timestamp: r.timestamp,
+        }));
+        
+        setCommentsMap(prev => ({
+          ...prev,
+          [appId]: formattedComments
+        }));
+      }
+    } catch (error) {
+      console.error(`Failed to fetch reviews for app ${appId}:`, error);
+    }
   };
+
+  useEffect(() => {
+    if (storeSelectedApp) {
+      fetchReviewsForApp(storeSelectedApp.id);
+    }
+  }, [storeSelectedApp]);
+
+  // טעינת ביקורות ברגע שנבחרת אפליקציה באזור המפתחים
+  useEffect(() => {
+    if (devSelectedApp) {
+      fetchReviewsForApp(devSelectedApp.id);
+    }
+  }, [devSelectedApp]);
+  
 
   const handleUploadApp = (newApp: AppData) => {
     setMyApps([...myApps, newApp]);
-    setAllApps([...allApps, newApp]);
+    setAllApps([...allApps, newApp,]);
     setIsUploading(false);
   };
+
+  const loadAppsFromBlockchain = async () => {
+  try {
+    const provider = new ethers.JsonRpcProvider("http://127.0.0.1:8545");
+    const contractAddress = process.env.NEXT_PUBLIC_CONTRACT_ADDRESS!;
+    const contract = new ethers.Contract(contractAddress, ContractABI.abi, provider);
+
+    const filter = contract.filters.AppPublished();
+    const events = await contract.queryFilter(filter);
+
+    const blockchainApps: AppData[] = events.map((event: any) => ({
+      id: event.args.appId.toString(),
+      name: event.args.name,
+      description: "App from Blockchain", 
+      category: "General",
+      rating: 4.5,
+      version: "1.0.0",
+      contractAddress: event.args.publisher
+    }));
+
+    setAllApps(blockchainApps);
+  } catch (error) {
+    console.error("Error loading apps:", error);
+  }
+};
+
+  useEffect(() => {
+  loadAppsFromBlockchain();
+  }, []);
 
   const filteredApps = allApps.filter(app => app.name.toLowerCase().includes(searchTerm.toLowerCase()));
 
@@ -75,7 +143,12 @@ export default function Home() {
         
         {activeTab === "store" && (
           storeSelectedApp ? (
-            <AppDetails app={storeSelectedApp} onBack={() => setStoreSelectedApp(null)} comments={commentsMap[storeSelectedApp.id] || []} onAddComment={(t, r) => handleAddComment(storeSelectedApp.id, t, r, false)} />
+            <AppDetails 
+              app={storeSelectedApp} 
+              onBack={() => setStoreSelectedApp(null)} 
+              comments={commentsMap[storeSelectedApp.id] || []} 
+              onReviewSubmitted={() => fetchReviewsForApp(storeSelectedApp.id)} 
+            />
           ) : (
             <>
               <SearchBar onSearch={setSearchTerm} />
@@ -86,11 +159,20 @@ export default function Home() {
 
         {activeTab === "dev" && (
           isUploading ? <UploadAppForm onCancel={() => setIsUploading(false)} onSubmit={handleUploadApp} /> :
-          devSelectedApp ? <DeveloperAppDetails app={devSelectedApp} onBack={() => setDevSelectedApp(null)} onUpdateVersion={(id, v) => setMyApps(prev => prev.map(a => a.id === id ? {...a, version: v} : a))} comments={commentsMap[devSelectedApp.id] || []} onAddComment={(t) => handleAddComment(devSelectedApp.id, t, 0, true)} /> :
+          devSelectedApp ? (
+            <DeveloperAppDetails 
+              app={devSelectedApp} 
+              onBack={() => setDevSelectedApp(null)} 
+              onUpdateVersion={(id, v) => setMyApps(prev => prev.map(a => a.id === id ? {...a, version: v} : a))} 
+              comments={commentsMap[devSelectedApp.id] || []} 
+              onReviewSubmitted={() => fetchReviewsForApp(devSelectedApp.id)} 
+            />
+          ) : (
           <div>
             <button onClick={() => setIsUploading(true)} style={{ marginBottom: "24px", padding: "10px 20px", backgroundColor: "#3b82f6", color: "white", border: "none", borderRadius: "8px", cursor: "pointer" }}>+ Upload App</button>
             <AppList apps={myApps} onSelectApp={setDevSelectedApp} />
           </div>
+          )
         )}
       </main>
     </div>

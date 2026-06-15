@@ -11,10 +11,10 @@ interface AppDetailsProps {
   app: AppData;
   onBack: () => void;
   comments: AppComment[];
-  onAddComment: (text: string, rating?: number) => void;
+ onReviewSubmitted: () => void;
 }
 
-export default function AppDetails({ app, onBack, comments, onAddComment }: AppDetailsProps) {
+export default function AppDetails({ app, onBack, comments, onReviewSubmitted }: AppDetailsProps) {
   return (
     <div style={{ width: "100%", maxWidth: "640px", margin: "0 auto" }}>
       <button onClick={onBack} style={{ background: "none", border: "none", color: "#3b82f6", cursor: "pointer", fontSize: "14px", fontWeight: "600", marginBottom: "24px", padding: 0 }}>
@@ -38,7 +38,7 @@ export default function AppDetails({ app, onBack, comments, onAddComment }: AppD
         <CommentsSection 
           appId={app.id}
           comments={comments} 
-          onReviewSubmitted={(text, rating) => onAddComment(text, rating)} 
+          onReviewSubmitted={onReviewSubmitted} 
           isDeveloperMode={false} 
         />
       </div>
