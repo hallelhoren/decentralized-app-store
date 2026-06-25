@@ -40,19 +40,14 @@ export default function Home() {
     try {
       const response = await fetch(`/api/reviews?appId=${appId}`);
       
-      // Check if response is valid
       if (!response.ok) {
         console.error("Server error or route not found:", response.status);
         return;
       }
 
-      // Read response as plain text first to prevent parse errors
       const text = await response.text();
-      if (!text) {
-        return;
-      }
+      if (!text) return;
 
-      // Parse text to JSON safely
       const data = JSON.parse(text);
 
       if (data.success && data.reviews) {
@@ -68,6 +63,16 @@ export default function Home() {
           ...prev,
           [appId]: formattedComments
         }));
+
+        const newRating = getUpdatedRating(appId, 0, formattedComments);
+
+        setAllApps(apps => 
+          apps.map(a => a.id === appId ? { ...a, rating: newRating } : a)
+        );
+
+        setMyApps(apps => 
+          apps.map(a => a.id === appId ? { ...a, rating: newRating } : a)
+        );
       }
     } catch (error) {
       console.error(`Failed to fetch reviews for app ${appId}:`, error);
@@ -108,7 +113,7 @@ export default function Home() {
       name: event.args.name,
       description: "App from Blockchain", 
       category: "General",
-      rating: 4.5,
+      rating: commentsMap[event.args.appId.toString()] ? getUpdatedRating(event.args.appId.toString(), 0, commentsMap[event.args.appId.toString()]) : 0,
       version: "1.0.0",
       contractAddress: event.args.publisher
     }));
