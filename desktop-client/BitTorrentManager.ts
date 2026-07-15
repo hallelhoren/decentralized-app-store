@@ -107,8 +107,21 @@ export class BitTorrentManager {
 
             // torrent.path is the directory WebTorrent actually stored the data under - for a
             // fresh download that's `dir`, but if this torrent already existed in the client
-            // (e.g. this process is also seeding it), it's wherever *that* copy lives instead.
-            const filePaths = torrent.files.map((f) => path.join(torrent.path, f.path));
+            // (e.g. this same process is also seeding it, which is the common case when
+            // testing upload+download on one machine), it's wherever *that* copy lives instead
+            // - meaning nothing would ever actually land in the app's own download folder,
+            // even though verification correctly reports success against the real file. Copy
+            // into `dir` explicitly whenever the source isn't already there, so a completed
+            // download always leaves a real, discoverable file at the expected location.
+            const filePaths = torrent.files.map((f) => {
+              const sourcePath = path.join(torrent.path, f.path);
+              const destPath = path.join(dir, f.path);
+              if (path.resolve(sourcePath) !== path.resolve(destPath)) {
+                fs.mkdirSync(path.dirname(destPath), { recursive: true });
+                fs.copyFileSync(sourcePath, destPath);
+              }
+              return destPath;
+            });
             onDone?.(filePaths);
           };
 

@@ -145,12 +145,31 @@ app.post('/api/upload', upload.single('file'), async (req: Request, res: Respons
 
 const PORT = process.env.DESKTOP_API_PORT || 3001;
 
+// Seeding lives entirely in this process's memory - restarting it (which happens often during
+// local dev) silently stops seeding every previously-published file, leaving on-chain torrent
+// refs pointing at nothing. Re-seeding everything already sitting in UPLOADS_DIR on startup
+// fixes that: WebTorrent derives the same infoHash for the same file content deterministically,
+// so this reproduces the exact magnet link that was already anchored on-chain, not a new one.
+async function reseedExistingUploads() {
+  const files = await fs.promises.readdir(UPLOADS_DIR).catch(() => [] as string[]);
+  for (const filename of files) {
+    const filePath = path.join(UPLOADS_DIR, filename);
+    try {
+      const magnetLink = await btManager.seedFile(filePath);
+      console.log(`[reseed] resumed seeding ${filename}: ${magnetLink}`);
+    } catch (error) {
+      console.error(`[reseed] failed to reseed ${filename}:`, error);
+    }
+  }
+}
+
 const server = app.listen(PORT, async () => {
   console.log(`Desktop client API running on ${PORT}`);
   try {
     await btManager.initialize();
     btInitialized = true;
     console.log('BitTorrent manager initialized successfully');
+    await reseedExistingUploads();
   } catch (error) {
     console.error('Failed to initialize BitTorrent manager:', error);
     console.error('Server is running but P2P functionality will be unavailable');
