@@ -46,6 +46,14 @@ contract DecentralizedAppStore {
     mapping(uint256 => uint256) public reportCount;
     mapping(uint256 => mapping(address => bool)) public hasReported;
 
+    // Root of a Merkle tree over the cache server's current app listing (see
+    // web-ui/src/lib/merkle.ts), anchored here so a client can verify the cache server's data
+    // against a value it did NOT get from the cache server itself - reading this one field
+    // directly from chain is what makes "verification does not rely on trusting the cache
+    // server" (see the HLD) actually true instead of just asserted. The aggregator re-submits
+    // this any time the underlying app data changes, same trust boundary as updateReviews.
+    bytes32 public merkleRoot;
+
     // Events for Indexer and Sync Module (Next.js Cache Server)
     event AppPublished(
         uint256 indexed appId,
@@ -81,6 +89,8 @@ contract DecentralizedAppStore {
     );
 
     event AggregatorChanged(address indexed previousAggregator, address indexed newAggregator);
+
+    event MerkleRootUpdated(bytes32 oldRoot, bytes32 newRoot, uint256 timestamp);
 
     // Modifiers
     modifier onlyPublisher(uint256 _appId) {
@@ -170,6 +180,19 @@ contract DecentralizedAppStore {
         apps[_appId].latestReviewsHash = _newReviewsHash;
 
         emit ReviewsAggregated(_appId, oldHash, _newReviewsHash, _torrentRef, block.timestamp);
+    }
+
+    /**
+     * @notice Anchors a new Merkle root over the cache server's current app listing, so a
+     * client can verify what the cache returns without trusting the cache itself - see
+     * web-ui/src/lib/merkle.ts for tree construction and proof verification.
+     * @param _newRoot The recomputed root over the current set of apps.
+     */
+    function updateMerkleRoot(bytes32 _newRoot) external onlyAggregator {
+        bytes32 oldRoot = merkleRoot;
+        merkleRoot = _newRoot;
+
+        emit MerkleRootUpdated(oldRoot, _newRoot, block.timestamp);
     }
 
     /**

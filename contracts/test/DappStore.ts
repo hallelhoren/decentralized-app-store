@@ -147,6 +147,28 @@ describe("DecentralizedAppStore", function () {
     });
   });
 
+  describe("updateMerkleRoot", function () {
+    it("lets the aggregator anchor a new root and emits MerkleRootUpdated", async function () {
+      const { store, owner } = await loadFixture(deployFixture);
+      const newRoot = ethers.keccak256(ethers.toUtf8Bytes("root-v1"));
+
+      await expect(store.connect(owner).updateMerkleRoot(newRoot))
+        .to.emit(store, "MerkleRootUpdated")
+        .withArgs(ethers.ZeroHash, newRoot, anyValue);
+
+      expect(await store.merkleRoot()).to.equal(newRoot);
+    });
+
+    it("rejects calls from anyone other than the current aggregator", async function () {
+      const { store, reviewer } = await loadFixture(deployFixture);
+      const newRoot = ethers.keccak256(ethers.toUtf8Bytes("root-v1"));
+
+      await expect(store.connect(reviewer).updateMerkleRoot(newRoot)).to.be.revertedWith(
+        "Not the authorized aggregator"
+      );
+    });
+  });
+
   describe("reportApp", function () {
     it("increments the report count and emits AppReported", async function () {
       const { store, publisher, reporter } = await loadFixture(deployFixture);
