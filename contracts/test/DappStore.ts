@@ -49,6 +49,15 @@ describe("DecentralizedAppStore", function () {
       ).to.be.revertedWith("App name cannot be empty");
     });
 
+    it("rejects publishing an app whose name is already taken", async function () {
+      const { store, publisher, otherPublisher } = await loadFixture(deployFixture);
+      await store.connect(publisher).publishApp("CryptoChess", "d", [], "magnet:1", SHA_DIGEST);
+
+      await expect(
+        store.connect(otherPublisher).publishApp("CryptoChess", "different desc", [], "magnet:2", OTHER_SHA_DIGEST)
+      ).to.be.revertedWith("App name already taken");
+    });
+
     it("increments appCount and assigns sequential ids across publishers", async function () {
       const { store, publisher, otherPublisher } = await loadFixture(deployFixture);
 
