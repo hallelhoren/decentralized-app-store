@@ -204,21 +204,28 @@ export class BitTorrentManager {
   }
 
   /**
-   * Stop seeding or downloading a torrent
+   * Stop seeding or downloading a torrent. Resolves once WebTorrent has actually finished
+   * tearing it down (and released any open file handles under its save path) - callers that
+   * need to delete that save path right after removal should await this first.
    */
-  removeTorrent(torrentId: string): void {
-    const torrent = this.torrents.get(torrentId);
-    if (torrent) {
+  removeTorrent(torrentId: string): Promise<void> {
+    return new Promise((resolve) => {
+      const torrent = this.torrents.get(torrentId);
+      if (!torrent) {
+        resolve();
+        return;
+      }
       this.client!.remove(torrent, { destroyStore: false }, (err) => {
         if (err) {
           console.error(`Error removing torrent ${torrentId}:`, err);
         } else {
           console.log(`Torrent ${torrentId} removed`);
         }
+        this.torrents.delete(torrentId);
+        this.progressMap.delete(torrentId);
+        resolve();
       });
-      this.torrents.delete(torrentId);
-      this.progressMap.delete(torrentId);
-    }
+    });
   }
 
   /**

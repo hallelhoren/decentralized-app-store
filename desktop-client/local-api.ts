@@ -38,6 +38,10 @@ const upload = multer({
 
 interface DownloadState {
   appId: string;
+  // What was actually requested for this appId - compared against future requests so a newly
+  // published version (a different magnetLink for the same appId) invalidates the cache
+  // instead of silently keeping serving whatever version happened to download first.
+  magnetLink: string;
   torrentId: string;
   savePath: string;
   expectedHash?: string;
@@ -72,15 +76,21 @@ app.post('/api/download', async (req: Request, res: Response) => {
 
     const existing = downloadsByAppId.get(appId);
     if (existing) {
-      if (existing.error) {
-        // Previous attempt failed. Drop the stale bookkeeping (and any half-registered
-        // torrent) so this request starts a fresh download instead of returning the same
-        // dead state forever.
-        if (existing.torrentId) btManager.removeTorrent(existing.torrentId);
-        downloadsByAppId.delete(appId);
-      } else {
+      if (!existing.error && existing.magnetLink === magnetLink) {
+        // Same version already downloading/downloaded for this appId - dedupe rather than
+        // starting a second torrent for identical content.
         return res.json({ status: 'started', appId, torrentId: existing.torrentId, savePath: existing.savePath });
       }
+
+      // Either the previous attempt errored, or - the common case - a developer published a
+      // new version after the old one already finished downloading here, so this request's
+      // magnetLink no longer matches what's cached for this appId. Tear down the old torrent
+      // and delete its downloaded file(s) before falling through to start a fresh download;
+      // otherwise the old version's file would just sit there and keep getting served forever
+      // (savePath is keyed only by appId, so the new download would land right on top of it).
+      if (existing.torrentId) await btManager.removeTorrent(existing.torrentId);
+      await fs.promises.rm(existing.savePath, { recursive: true, force: true }).catch(() => {});
+      downloadsByAppId.delete(appId);
     }
 
     const savePath = path.join(APPS_DIR, appId);
@@ -91,7 +101,7 @@ app.post('/api/download', async (req: Request, res: Response) => {
     // btManager.downloadFile()'s promise even resolves. If this bookkeeping entry were only
     // added after that await, the completion callback below would look it up, find nothing,
     // and silently skip verification.
-    const state: DownloadState = { appId, torrentId: '', savePath, expectedHash, verified: null };
+    const state: DownloadState = { appId, magnetLink, torrentId: '', savePath, expectedHash, verified: null };
     downloadsByAppId.set(appId, state);
 
     const torrentId = await btManager.downloadFile(
