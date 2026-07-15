@@ -23,7 +23,19 @@ export async function GET(request: Request) {
       orderBy: { publishedAt: "desc" },
     });
 
-    return NextResponse.json({ apps });
+    // publisherName is a UI-only convenience looked up from our local User table (see
+    // api/profile/route.ts) - it's never part of the on-chain App struct, so a publisher who
+    // hasn't set one just comes back null and the UI falls back to the truncated address.
+    const publisherAddresses = Array.from(new Set(apps.map((a) => a.publisher.toLowerCase())));
+    const users = await prisma.user.findMany({ where: { walletAddress: { in: publisherAddresses } } });
+    const usernameByAddress = new Map(users.map((u) => [u.walletAddress, u.username]));
+
+    const appsWithPublisherName = apps.map((app) => ({
+      ...app,
+      publisherName: usernameByAddress.get(app.publisher.toLowerCase()) ?? null,
+    }));
+
+    return NextResponse.json({ apps: appsWithPublisherName });
   } catch (error) {
     console.error("Error in GET /api/apps:", error);
     return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });

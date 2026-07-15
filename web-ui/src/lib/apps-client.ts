@@ -3,6 +3,7 @@ import type { AppData } from "../components/AppList";
 export interface ApiApp {
   id: number;
   publisher: string;
+  publisherName: string | null;
   name: string;
   description: string;
   tags: string[];
@@ -25,8 +26,14 @@ export function toAppData(app: ApiApp): AppData {
     reportCount: app.reportCount,
     version: String(app.latestVersionId),
     publisher: app.publisher,
+    publisherName: app.publisherName,
     versions: app.versions,
   };
+}
+
+/** The publisher's chosen display name if they've set one, otherwise a truncated address. */
+export function formatPublisher(address: string, publisherName: string | null): string {
+  return publisherName || `${address.slice(0, 6)}...${address.slice(-4)}`;
 }
 
 /** Shared by /store and /dev - both just render different slices/links over the same app list. */

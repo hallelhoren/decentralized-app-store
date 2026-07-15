@@ -75,3 +75,14 @@ model SyncState {
   id        Int @id @default(1)
   lastBlock Int @default(0)
 }
+
+// Maps a wallet address to a display name the user chose for themselves, purely a UI-level
+// convenience layered on top of the on-chain publisher address (see api/profile/route.ts).
+// Nothing on-chain, and no App/Version row, ever references this table - every existing
+// publisher reference keeps using the raw address, and this is only ever consulted at render
+// time to look up a friendlier label for it. A wallet with no row here just has no username
+// yet (the UI falls back to a truncated address).
+model User {
+  walletAddress String @unique
+  username      String
+}

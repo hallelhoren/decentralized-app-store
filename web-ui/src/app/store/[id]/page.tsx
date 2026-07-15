@@ -9,7 +9,7 @@ import CommentsSection, { AppComment } from "../../../components/CommentsSection
 import RatingStars from "../../../components/RatingStars";
 import VerifyBadge from "../../../components/VerifyBadge";
 import { getEthereumContractWithSigner } from "../../../lib/blockchain";
-import { fetchAllApps } from "../../../lib/apps-client";
+import { fetchAllApps, formatPublisher } from "../../../lib/apps-client";
 import { useWallet } from "../../../lib/wallet-context";
 
 export default function StoreAppDetailPage() {
@@ -121,7 +121,7 @@ export default function StoreAppDetailPage() {
         <Text>{app.description}</Text>
 
         <Text size="xs" c="dimmed" ff="monospace">
-          Publisher: {app.publisher}
+          Publisher: {formatPublisher(app.publisher, app.publisherName)}
         </Text>
 
         {app.versions.length > 0 && (

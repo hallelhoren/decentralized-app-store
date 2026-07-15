@@ -24,6 +24,7 @@ export interface AppData {
   reportCount: number;
   version: string;
   publisher: string;
+  publisherName: string | null;
   versions: AppVersion[];
 }
 
