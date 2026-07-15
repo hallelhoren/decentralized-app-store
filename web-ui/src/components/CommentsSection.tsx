@@ -1,10 +1,7 @@
 "use client";
 
 import { useState } from "react";
-
-// This component will handle the comments and reviews for each app. 
-// It will allow users to leave comments and ratings, and developers to post updates or patch notes that are pinned at the top of the comments section.
-
+import { Badge, Button, Divider, Group, Paper, Rating, Stack, Text, Textarea, Title } from "@mantine/core";
 
 export interface AppComment {
   id: string;
@@ -25,7 +22,7 @@ interface CommentsSectionProps {
 export default function CommentsSection({ appId, comments = [], onReviewSubmitted, isDeveloperMode, reviewerAddress }: CommentsSectionProps) {
   const [newComment, setNewComment] = useState("");
   const [rating, setRating] = useState(5);
-  const [isLoading, setIsLoading] = useState(false); 
+  const [isLoading, setIsLoading] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -38,7 +35,6 @@ export default function CommentsSection({ appId, comments = [], onReviewSubmitte
     setIsLoading(true);
 
     try {
-      // instead of directly updating the state, we send the new comment to the backend API
       const response = await fetch("/api/reviews", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -56,12 +52,11 @@ export default function CommentsSection({ appId, comments = [], onReviewSubmitte
         throw new Error(errorBody?.error || "Failed to submit review");
       }
 
-      // reset form and refresh comments
       const submittedText = newComment;
       const submittedRating = isDeveloperMode ? undefined : rating;
       setNewComment("");
       setRating(5);
-      onReviewSubmitted(submittedText, submittedRating); 
+      onReviewSubmitted(submittedText, submittedRating);
     } catch (error) {
       console.error("Error submitting review:", error);
       const message = error instanceof Error ? error.message : "Failed to submit review.";
@@ -71,8 +66,6 @@ export default function CommentsSection({ appId, comments = [], onReviewSubmitte
     }
   };
 
-
-  // Sort comments: Developer comments always at the top, then newest first
   const sortedComments = [...comments].sort((a, b) => {
     if (a.isDeveloper && !b.isDeveloper) return -1;
     if (!a.isDeveloper && b.isDeveloper) return 1;
@@ -80,91 +73,69 @@ export default function CommentsSection({ appId, comments = [], onReviewSubmitte
   });
 
   return (
-    <div style={{ marginTop: "40px", borderTop: "1px solid #334155", paddingTop: "24px" }}>
-      <h3 style={{ color: "#f8fafc", marginBottom: "16px" }}>Comments & Reviews</h3>
+    <Stack mt="xl" pt="lg">
+      <Divider />
+      <Title order={4}>Comments & Reviews</Title>
 
-      {/* Comment Form */}
-      <form onSubmit={handleSubmit} style={{ backgroundColor: "#0f172a", padding: "16px", borderRadius: "12px", marginBottom: "24px", border: "1px solid #1e293b" }}>
-        <h4 style={{ margin: "0 0 12px 0", color: "#cbd5e1" }}>
-          {isDeveloperMode ? "Post a Developer Update (Pinned)" : "Leave a Review"}
-        </h4>
-        
-        {!isDeveloperMode && (
-          <div style={{ marginBottom: "12px", display: "flex", gap: "8px", alignItems: "center" }}>
-            <span style={{ color: "#94a3b8", fontSize: "14px" }}>Rating:</span>
-            {[1, 2, 3, 4, 5].map((star) => (
-              <button
-                key={star}
-                type="button"
-                onClick={() => setRating(star)}
-                style={{ background: "none", border: "none", cursor: "pointer", fontSize: "20px", color: star <= rating ? "#fbbf24" : "#475569", padding: 0 }}
-              >
-                ★
-              </button>
-            ))}
-          </div>
-        )}
+      <Paper component="form" onSubmit={handleSubmit} withBorder p="md" radius="md">
+        <Stack gap="sm">
+          <Text fw={600} size="sm">
+            {isDeveloperMode ? "Post a Developer Update (Pinned)" : "Leave a Review"}
+          </Text>
 
-        <textarea
-          placeholder={isDeveloperMode ? "Share updates or patch notes with your users..." : "What do you think about this app?"}
-          value={newComment}
-          onChange={(e) => setNewComment(e.target.value)}
-          required
-          rows={3}
-          style={{ width: "100%", padding: "12px", borderRadius: "8px", border: "1px solid #334155", backgroundColor: "#1e293b", color: "white", boxSizing: "border-box", marginBottom: "12px", resize: "vertical" }}
-        />
-        
-        <button 
-          type="submit" 
-          disabled={isLoading}
-          style={{ 
-            padding: "10px 20px", 
-            borderRadius: "8px", 
-            border: "none", 
-            backgroundColor: isDeveloperMode ? "#f59e0b" : "#3b82f6", 
-            color: "white", 
-            fontWeight: "bold", 
-            cursor: isLoading ? "not-allowed" : "pointer",
-            opacity: isLoading ? 0.7 : 1
-          }}
-        >
-          {isLoading ? "Submitting..." : (isDeveloperMode ? "Post Developer Update" : "Post Comment")}
-      </button>
-      </form>
+          {!isDeveloperMode && <Rating value={rating} onChange={setRating} />}
 
-      {/* Comments List */}
-      <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+          <Textarea
+            placeholder={isDeveloperMode ? "Share updates or patch notes with your users..." : "What do you think about this app?"}
+            value={newComment}
+            onChange={(e) => setNewComment(e.currentTarget.value)}
+            required
+            minRows={3}
+            autosize
+          />
+
+          <Group justify="flex-end">
+            <Button type="submit" loading={isLoading} color={isDeveloperMode ? "orange" : "brand"}>
+              {isDeveloperMode ? "Post Developer Update" : "Post Comment"}
+            </Button>
+          </Group>
+        </Stack>
+      </Paper>
+
+      <Stack gap="sm">
         {sortedComments.length === 0 ? (
-          <p style={{ color: "#64748b", fontSize: "14px" }}>No comments yet. Be the first!</p>
+          <Text c="dimmed" size="sm">
+            No comments yet. Be the first!
+          </Text>
         ) : (
           sortedComments.map((comment) => (
-            <div key={comment.id} style={{ backgroundColor: comment.isDeveloper ? "rgba(245, 158, 11, 0.05)" : "#1e293b", padding: "16px", borderRadius: "12px", border: comment.isDeveloper ? "1px solid rgba(245, 158, 11, 0.3)" : "1px solid #334155" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "8px" }}>
-                <div>
+            <Paper
+              key={comment.id}
+              withBorder
+              p="md"
+              radius="md"
+              style={comment.isDeveloper ? { backgroundColor: "#fff8ec", borderColor: "#fbbf24" } : undefined}
+            >
+              <Group justify="space-between" mb={6}>
+                <Group gap="xs">
                   {comment.isDeveloper ? (
-                    <span style={{ backgroundColor: "#f59e0b", color: "#fff", fontSize: "12px", padding: "4px 8px", borderRadius: "4px", fontWeight: "bold", marginRight: "8px" }}>
-                      Developer
-                    </span>
+                    <Badge color="orange">Developer</Badge>
                   ) : (
-                    <span style={{ color: "#f8fafc", fontWeight: "bold", marginRight: "8px" }}>User</span>
+                    <Text fw={600} size="sm">
+                      User
+                    </Text>
                   )}
-                  {!comment.isDeveloper && comment.rating && (
-                    <span style={{ color: "#fbbf24", fontSize: "14px" }}>
-                      {"★".repeat(comment.rating)}{"☆".repeat(5 - comment.rating)}
-                    </span>
-                  )}
-                </div>
-                <span style={{ color: "#64748b", fontSize: "12px" }}>
+                  {!comment.isDeveloper && comment.rating && <Rating value={comment.rating} readOnly size="xs" />}
+                </Group>
+                <Text size="xs" c="dimmed">
                   {new Date(comment.timestamp).toLocaleDateString()}
-                </span>
-              </div>
-              <p style={{ color: "#cbd5e1", margin: 0, fontSize: "15px", lineHeight: "1.5" }}>
-                {comment.text}
-              </p>
-            </div>
+                </Text>
+              </Group>
+              <Text size="sm">{comment.text}</Text>
+            </Paper>
           ))
         )}
-      </div>
-    </div>
+      </Stack>
+    </Stack>
   );
 }

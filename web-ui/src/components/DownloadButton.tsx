@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
+import { Alert, Button, Progress, Stack, Text } from "@mantine/core";
 
 type Status = "idle" | "in_progress" | "finished";
 
@@ -10,8 +11,8 @@ export default function DownloadButton({ appId }: { appId: string }) {
   const [error, setError] = useState<string | null>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // Without this, navigating away mid-download (e.g. clicking "Back to Store") never clears
-  // the interval - it keeps polling /api/status once a second forever, since nothing else
+  // Without this, navigating away mid-download (e.g. back to /store) never clears the
+  // interval - it keeps polling /api/status once a second forever, since nothing else
   // ever stops it once the component that created it is gone.
   useEffect(() => {
     return () => {
@@ -56,47 +57,45 @@ export default function DownloadButton({ appId }: { appId: string }) {
   };
 
   return (
-    <div style={{ width: "256px" }}>
+    <Stack gap="xs" style={{ width: 260 }}>
       {status === "idle" && (
-        <button
-          onClick={startDownload}
-          style={{ width: "100%", padding: "12px 24px", borderRadius: "8px", border: "none", backgroundColor: "#4f46e5", color: "white", fontWeight: "600", cursor: "pointer" }}
-        >
+        <Button onClick={startDownload} fullWidth>
           Download App
-        </button>
+        </Button>
       )}
 
       {status === "in_progress" && (
-        <div>
-          <div style={{ display: "flex", justifyContent: "space-between", fontSize: "13px", color: "#cbd5e1", marginBottom: "6px" }}>
-            <span>Downloading via BitTorrent...</span>
-            <span>{Math.round(progress)}%</span>
-          </div>
-          <div style={{ width: "100%", backgroundColor: "#334155", borderRadius: "999px", height: "8px", overflow: "hidden" }}>
-            <div style={{ width: `${progress}%`, backgroundColor: "#4f46e5", height: "100%", transition: "width 0.5s ease-out" }} />
-          </div>
-        </div>
+        <Stack gap={4}>
+          <Text size="xs" c="dimmed">
+            Downloading via BitTorrent... {Math.round(progress)}%
+          </Text>
+          <Progress value={progress} animated />
+        </Stack>
       )}
 
       {status === "finished" && verified === true && (
-        <div style={{ width: "100%", backgroundColor: "rgba(16,185,129,0.15)", color: "#10b981", textAlign: "center", fontWeight: "bold", padding: "12px", borderRadius: "8px", border: "1px solid rgba(16,185,129,0.4)" }}>
-          ✓ Downloaded &amp; verified (SHA-256 matches on-chain hash)
-        </div>
+        <Alert color="green" title="Downloaded & verified">
+          SHA-256 matches the on-chain hash.
+        </Alert>
       )}
 
       {status === "finished" && verified === false && (
-        <div style={{ width: "100%", backgroundColor: "rgba(239,68,68,0.15)", color: "#ef4444", textAlign: "center", fontWeight: "bold", padding: "12px", borderRadius: "8px", border: "1px solid rgba(239,68,68,0.4)" }}>
-          ✗ Hash mismatch - file rejected, do not install
-        </div>
+        <Alert color="red" title="Hash mismatch">
+          File rejected - do not install.
+        </Alert>
       )}
 
       {status === "finished" && verified === null && (
-        <div style={{ width: "100%", backgroundColor: "rgba(148,163,184,0.15)", color: "#cbd5e1", textAlign: "center", fontWeight: "bold", padding: "12px", borderRadius: "8px", border: "1px solid #334155" }}>
-          ✓ Downloaded (integrity not checked)
-        </div>
+        <Alert color="gray" title="Downloaded">
+          Integrity not checked.
+        </Alert>
       )}
 
-      {error && <p style={{ color: "#ef4444", fontSize: "13px", marginTop: "8px" }}>{error}</p>}
-    </div>
+      {error && (
+        <Text c="red" size="xs">
+          {error}
+        </Text>
+      )}
+    </Stack>
   );
 }

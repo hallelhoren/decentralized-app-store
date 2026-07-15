@@ -1,6 +1,6 @@
 "use client";
 
-import type { CSSProperties } from "react";
+import { Chip, Group, Select, TextInput } from "@mantine/core";
 
 export interface SearchFilters {
   search: string;
@@ -14,44 +14,39 @@ interface SearchBarProps {
   onChange: (filters: SearchFilters) => void;
 }
 
-const selectStyle: CSSProperties = {
-  padding: "12px 16px",
-  borderRadius: "8px",
-  border: "1px solid #334155",
-  backgroundColor: "#1e293b",
-  color: "white",
-};
-
 export default function SearchBar({ filters, categories, onChange }: SearchBarProps) {
   return (
-    <div style={{ display: "flex", gap: "12px", marginBottom: "24px", flexWrap: "wrap" }}>
-      <input
-        type="text"
+    <Group mb="lg" align="flex-end" wrap="wrap">
+      <TextInput
         placeholder="Search apps by name..."
         value={filters.search}
-        onChange={(e) => onChange({ ...filters, search: e.target.value })}
-        style={{ ...selectStyle, flex: 1, minWidth: "200px" }}
+        onChange={(e) => onChange({ ...filters, search: e.currentTarget.value })}
+        style={{ flex: 1, minWidth: 220 }}
       />
-      <select
+      <Select
+        placeholder="Any rating"
+        data={["4+ stars", "3+ stars", "2+ stars", "1+ stars"]}
+        value={filters.minRating > 0 ? `${filters.minRating}+ stars` : null}
+        onChange={(value) => onChange({ ...filters, minRating: value ? Number(value[0]) : 0 })}
+        clearable
+        w={160}
+      />
+
+      <Chip.Group
         value={filters.category}
-        onChange={(e) => onChange({ ...filters, category: e.target.value })}
-        style={selectStyle}
+        onChange={(value) => onChange({ ...filters, category: Array.isArray(value) ? value[0] ?? "" : value })}
       >
-        <option value="">All categories</option>
-        {categories.map((c) => (
-          <option key={c} value={c}>{c}</option>
-        ))}
-      </select>
-      <select
-        value={filters.minRating}
-        onChange={(e) => onChange({ ...filters, minRating: Number(e.target.value) })}
-        style={selectStyle}
-      >
-        <option value={0}>Any rating</option>
-        {[4, 3, 2, 1].map((r) => (
-          <option key={r} value={r}>{r}+ stars</option>
-        ))}
-      </select>
-    </div>
+        <Group gap="xs">
+          <Chip value="" variant="light">
+            All
+          </Chip>
+          {categories.map((c) => (
+            <Chip key={c} value={c} variant="light">
+              {c}
+            </Chip>
+          ))}
+        </Group>
+      </Chip.Group>
+    </Group>
   );
 }
