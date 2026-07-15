@@ -46,7 +46,8 @@ export class BitTorrentManager {
   async downloadFile(
     magnetLink: string,
     savePath: string,
-    onDone?: (filePaths: string[]) => void
+    onDone?: (filePaths: string[]) => void,
+    onError?: (err: Error) => void
   ): Promise<string> {
     if (!this.client) {
       throw new Error('BitTorrent client not initialized. Call initialize() first.');
@@ -134,6 +135,12 @@ export class BitTorrentManager {
             console.error(`[${torrentId}] Torrent error:`, err);
             this.torrents.delete(torrentId);
             this.progressMap.delete(torrentId);
+            // By the time a real torrent error fires, downloadFile()'s promise has almost
+            // always already resolved (resolve() runs synchronously right after this listener
+            // is attached, inside the same client.add() callback) - so reject() below only
+            // catches the rare case where this fires before that. The caller relies on
+            // onError to learn about failures that happen after it already got a torrentId.
+            onError?.(err instanceof Error ? err : new Error(String(err)));
             reject(err);
           });
 

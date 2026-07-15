@@ -4,6 +4,7 @@ import multer from 'multer';
 import * as path from 'path';
 import * as os from 'os';
 import * as fs from 'fs';
+import * as crypto from 'crypto';
 import BitTorrentManager from './BitTorrentManager';
 import HashVerifier from './HashVerifier';
 
@@ -22,8 +23,16 @@ fs.mkdirSync(UPLOADS_DIR, { recursive: true });
 
 const upload = multer({
   storage: multer.diskStorage({
-    destination: UPLOADS_DIR,
-    filename: (_req, file, cb) => cb(null, `${Date.now()}-${file.originalname}`),
+    // Each upload gets its own subdirectory so the file itself can keep its real name - that
+    // name is what ends up in the torrent's file listing / magnet `dn`, and later becomes the
+    // downloader's Content-Disposition filename, so mangling it here (e.g. a timestamp prefix
+    // to dodge collisions) would otherwise follow the file all the way to the user's browser.
+    destination: (_req, _file, cb) => {
+      const dir = path.join(UPLOADS_DIR, crypto.randomUUID());
+      fs.mkdirSync(dir, { recursive: true });
+      cb(null, dir);
+    },
+    filename: (_req, file, cb) => cb(null, file.originalname),
   }),
 });
 
@@ -34,6 +43,13 @@ interface DownloadState {
   expectedHash?: string;
   // null = nothing to verify yet (still downloading, or caller supplied no expected hash)
   verified: boolean | null;
+  // Absolute paths of the downloaded file(s), set once the torrent's 'done' event fires -
+  // this is what GET /api/download/file serves.
+  filePaths?: string[];
+  // Set if the torrent errors out after the initial request already returned 200 - lets
+  // /api/status report a real failure instead of polling 'idle' forever, and lets a
+  // subsequent POST /api/download retry instead of being stuck behind a dead entry.
+  error?: string;
 }
 
 // Web UI / Next.js cache server only ever needs to think in terms of appId, not torrent
@@ -56,7 +72,15 @@ app.post('/api/download', async (req: Request, res: Response) => {
 
     const existing = downloadsByAppId.get(appId);
     if (existing) {
-      return res.json({ status: 'started', appId, torrentId: existing.torrentId, savePath: existing.savePath });
+      if (existing.error) {
+        // Previous attempt failed. Drop the stale bookkeeping (and any half-registered
+        // torrent) so this request starts a fresh download instead of returning the same
+        // dead state forever.
+        if (existing.torrentId) btManager.removeTorrent(existing.torrentId);
+        downloadsByAppId.delete(appId);
+      } else {
+        return res.json({ status: 'started', appId, torrentId: existing.torrentId, savePath: existing.savePath });
+      }
     }
 
     const savePath = path.join(APPS_DIR, appId);
@@ -70,17 +94,25 @@ app.post('/api/download', async (req: Request, res: Response) => {
     const state: DownloadState = { appId, torrentId: '', savePath, expectedHash, verified: null };
     downloadsByAppId.set(appId, state);
 
-    const torrentId = await btManager.downloadFile(magnetLink, savePath, async (filePaths) => {
-      if (expectedHash && filePaths.length > 0) {
-        try {
-          state.verified = await HashVerifier.verifyFileHash(filePaths[0], expectedHash);
-          console.log(`[${appId}] hash verification ${state.verified ? 'PASSED' : 'FAILED'}`);
-        } catch (err) {
-          console.error(`[${appId}] hash verification error:`, err);
-          state.verified = false;
+    const torrentId = await btManager.downloadFile(
+      magnetLink,
+      savePath,
+      async (filePaths) => {
+        state.filePaths = filePaths;
+        if (expectedHash && filePaths.length > 0) {
+          try {
+            state.verified = await HashVerifier.verifyFileHash(filePaths[0], expectedHash);
+            console.log(`[${appId}] hash verification ${state.verified ? 'PASSED' : 'FAILED'}`);
+          } catch (err) {
+            console.error(`[${appId}] hash verification error:`, err);
+            state.verified = false;
+          }
         }
+      },
+      (err) => {
+        state.error = err.message;
       }
-    });
+    );
 
     state.torrentId = torrentId;
 
@@ -102,6 +134,17 @@ app.get('/api/status', (req: Request, res: Response) => {
     return res.json({ status: 'idle', progress: 0, verified: null });
   }
 
+  if (state.error) {
+    return res.json({ status: 'error', progress: 0, verified: state.verified, error: state.error });
+  }
+
+  if (!state.torrentId) {
+    // Registered but torrent metadata/peer discovery hasn't resolved yet, so there's no
+    // progressMap entry to look up. A download has genuinely started - report in_progress
+    // rather than idle, which would be indistinguishable from no download at all.
+    return res.json({ status: 'in_progress', progress: 0, verified: null });
+  }
+
   const progress = btManager.getProgress(state.torrentId);
   if (!progress) {
     return res.json({ status: 'idle', progress: 0, verified: null });
@@ -117,6 +160,38 @@ app.get('/api/status', (req: Request, res: Response) => {
     total: progress.total,
     // Only meaningful once the download is finished; while in progress it's always null.
     verified: status === 'finished' ? state.verified : null,
+  });
+});
+
+// Serves the actual completed file bytes so the browser can save it locally. Refuses to
+// serve anything that failed hash verification, and won't serve before the torrent's
+// 'done' event has populated filePaths.
+app.get('/api/download/file', (req: Request, res: Response) => {
+  const appId = req.query.appId as string;
+  if (!appId) {
+    return res.status(400).json({ error: 'appId is required' });
+  }
+
+  const state = downloadsByAppId.get(appId);
+  if (!state) {
+    return res.status(404).json({ error: 'No download found for this appId' });
+  }
+  if (state.verified === false) {
+    return res.status(403).json({ error: 'Hash verification failed; refusing to serve file' });
+  }
+  if (!state.filePaths || state.filePaths.length === 0) {
+    return res.status(409).json({ error: 'Download has not finished yet' });
+  }
+
+  const filePath = state.filePaths[0];
+  if (!fs.existsSync(filePath)) {
+    return res.status(410).json({ error: 'Downloaded file is no longer on disk' });
+  }
+
+  res.download(filePath, path.basename(filePath), (err) => {
+    if (err) {
+      console.error(`[${appId}] Error serving file to client:`, err);
+    }
   });
 });
 
@@ -151,14 +226,24 @@ const PORT = process.env.DESKTOP_API_PORT || 3001;
 // fixes that: WebTorrent derives the same infoHash for the same file content deterministically,
 // so this reproduces the exact magnet link that was already anchored on-chain, not a new one.
 async function reseedExistingUploads() {
-  const files = await fs.promises.readdir(UPLOADS_DIR).catch(() => [] as string[]);
-  for (const filename of files) {
-    const filePath = path.join(UPLOADS_DIR, filename);
+  const entries = await fs.promises.readdir(UPLOADS_DIR).catch(() => [] as string[]);
+  for (const entry of entries) {
+    const entryPath = path.join(UPLOADS_DIR, entry);
     try {
+      const stat = await fs.promises.stat(entryPath);
+      // New layout: one subdirectory per upload, holding the file under its real name. Old
+      // layout (uploads from before per-upload subdirectories): the file sits directly in
+      // UPLOADS_DIR - still seeded as-is, since already-published torrentRefs anchored
+      // on-chain from that layout need to keep resolving to the same infoHash.
+      const filePath = stat.isDirectory()
+        ? path.join(entryPath, (await fs.promises.readdir(entryPath))[0] ?? '')
+        : entryPath;
+      if (!filePath || !fs.existsSync(filePath)) continue;
+
       const magnetLink = await btManager.seedFile(filePath);
-      console.log(`[reseed] resumed seeding ${filename}: ${magnetLink}`);
+      console.log(`[reseed] resumed seeding ${path.basename(filePath)}: ${magnetLink}`);
     } catch (error) {
-      console.error(`[reseed] failed to reseed ${filename}:`, error);
+      console.error(`[reseed] failed to reseed ${entry}:`, error);
     }
   }
 }
