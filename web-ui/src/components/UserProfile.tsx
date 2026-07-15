@@ -1,5 +1,7 @@
 "use client";
 
+import { Avatar, Button, Group, Paper, Stack, Text, Title } from "@mantine/core";
+
 interface UserProfileProps {
   appCount: number;
   walletAddress: string | null;
@@ -8,42 +10,43 @@ interface UserProfileProps {
 
 export default function UserProfile({ appCount, walletAddress, onConnectWallet }: UserProfileProps) {
   const initials = walletAddress ? walletAddress.slice(2, 4).toUpperCase() : "?";
-  const shortAddress = walletAddress
-    ? `${walletAddress.slice(0, 6)}...${walletAddress.slice(-4)}`
-    : null;
+  const shortAddress = walletAddress ? `${walletAddress.slice(0, 6)}...${walletAddress.slice(-4)}` : null;
 
   return (
-    <div style={{ maxWidth: "600px", margin: "0 auto", backgroundColor: "#1e293b", padding: "32px", borderRadius: "16px", border: "1px solid #334155" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: "20px", marginBottom: "32px" }}>
-        <div style={{ width: "80px", height: "80px", backgroundColor: "#3b82f6", borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "28px", fontWeight: "bold" }}>
+    <Paper withBorder p="xl" radius="md" maw={480}>
+      <Group mb="xl">
+        <Avatar color="brand" radius="xl" size={64}>
           {initials}
-        </div>
+        </Avatar>
         <div>
           {walletAddress ? (
             <>
-              <h2 style={{ margin: "0 0 8px 0", fontSize: "20px", color: "#f8fafc", fontFamily: "monospace" }}>{shortAddress}</h2>
-              <p style={{ margin: 0, color: "#94a3b8" }}>Connected wallet</p>
+              <Title order={4} ff="monospace">
+                {shortAddress}
+              </Title>
+              <Text c="dimmed" size="sm">
+                Connected wallet
+              </Text>
             </>
           ) : (
-            <>
-              <h2 style={{ margin: "0 0 8px 0", fontSize: "20px", color: "#f8fafc" }}>No wallet connected</h2>
-              <button
-                onClick={onConnectWallet}
-                style={{ padding: "8px 16px", borderRadius: "8px", border: "none", backgroundColor: "#3b82f6", color: "white", fontWeight: "bold", cursor: "pointer" }}
-              >
+            <Stack gap="xs">
+              <Title order={4}>No wallet connected</Title>
+              <Button onClick={onConnectWallet} size="xs" style={{ alignSelf: "flex-start" }}>
                 Connect Wallet
-              </button>
-            </>
+              </Button>
+            </Stack>
           )}
         </div>
-      </div>
+      </Group>
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: "16px" }}>
-        <div style={{ backgroundColor: "#0f172a", padding: "16px", borderRadius: "8px", border: "1px solid #1e293b" }}>
-          <div style={{ color: "#64748b", fontSize: "14px", marginBottom: "8px" }}>Apps Published</div>
-          <div style={{ color: "#f8fafc", fontSize: "18px", fontWeight: "600" }}>{appCount}</div>
-        </div>
-      </div>
-    </div>
+      <Paper withBorder p="md" radius="md" bg="gray.0">
+        <Text size="sm" c="dimmed" mb={4}>
+          Apps Published
+        </Text>
+        <Text fw={700} size="lg">
+          {appCount}
+        </Text>
+      </Paper>
+    </Paper>
   );
 }

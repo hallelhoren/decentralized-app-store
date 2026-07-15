@@ -1,7 +1,9 @@
 "use client";
 
 import { useState } from "react";
+import { Button, FileInput, Group, Paper, Stack, Text, TextInput, Textarea, Title } from "@mantine/core";
 import { getEthereumContractWithSigner } from "../lib/blockchain";
+import { fetchAllApps } from "../lib/apps-client";
 
 interface UploadAppFormProps {
   onCancel: () => void;
@@ -28,10 +30,20 @@ export default function UploadAppForm({ onCancel, onSubmit }: UploadAppFormProps
     setIsLoading(true);
 
     try {
+      // The contract itself is the real enforcement (see DappStore.sol's isNameTaken check) -
+      // this is just a cheap up-front check so a duplicate name fails immediately instead of
+      // after the file's already been hashed/seeded and the wallet's already been prompted.
+      setStatusMessage("Checking name availability...");
+      const existingApps = await fetchAllApps();
+      if (existingApps.some((a) => a.name === name)) {
+        alert(`"${name}" is already taken. Choose a different name.`);
+        setIsLoading(false);
+        setStatusMessage("");
+        return;
+      }
+
       // 1. Hand the real file to the desktop client: it hashes it (SHA-256) and starts
       // seeding it over BitTorrent, returning the magnet link + hash to anchor on-chain.
-      // Browsers can't hand over an absolute filesystem path, so the binary itself is what
-      // gets sent here - not a path string like the earlier mocked version assumed.
       setStatusMessage("Hashing and seeding file via desktop client...");
       const formData = new FormData();
       formData.append("file", file);
@@ -45,8 +57,6 @@ export default function UploadAppForm({ onCancel, onSubmit }: UploadAppFormProps
       }
       const { magnetLink, fileHash } = await uploadRes.json();
 
-      // 2. Initialize the smart contract instance connected to MetaMask (this also forces
-      // MetaMask onto the local Hardhat network before signing anything).
       setStatusMessage("Waiting for wallet...");
       const contract = await getEthereumContractWithSigner();
 
@@ -72,51 +82,38 @@ export default function UploadAppForm({ onCancel, onSubmit }: UploadAppFormProps
   };
 
   return (
-    <div style={{ maxWidth: "500px", margin: "0 auto", backgroundColor: "#1e293b", padding: "32px", borderRadius: "16px", border: "1px solid #334155" }}>
-      <h2 style={{ marginTop: 0, color: "#f8fafc" }}>Upload New dApp</h2>
-      <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-        <input
-          placeholder="App Name" value={name} onChange={(e) => setName(e.target.value)} required
-          disabled={isLoading}
-          style={{ padding: "12px", borderRadius: "8px", border: "1px solid #334155", backgroundColor: "#0f172a", color: "white" }}
-        />
-        <textarea
-          placeholder="Description" value={description} onChange={(e) => setDescription(e.target.value)} required rows={4}
-          disabled={isLoading}
-          style={{ padding: "12px", borderRadius: "8px", border: "1px solid #334155", backgroundColor: "#0f172a", color: "white" }}
-        />
-        <input
-          placeholder="Tags (comma separated, e.g. tools, utility, game)"
-          value={tagsInput} onChange={(e) => setTagsInput(e.target.value)}
-          disabled={isLoading}
-          style={{ padding: "12px", borderRadius: "8px", border: "1px solid #334155", backgroundColor: "#0f172a", color: "white" }}
-        />
-        <label style={{ color: "#94a3b8", fontSize: "14px" }}>
-          Application binary
-          <input
-            type="file"
-            required
+    <Paper withBorder p="xl" radius="md" maw={480}>
+      <Title order={3} mb="md">
+        Upload New dApp
+      </Title>
+      <form onSubmit={handleSubmit}>
+        <Stack gap="md">
+          <TextInput placeholder="App Name" value={name} onChange={(e) => setName(e.currentTarget.value)} required disabled={isLoading} />
+          <Textarea placeholder="Description" value={description} onChange={(e) => setDescription(e.currentTarget.value)} required minRows={4} disabled={isLoading} />
+          <TextInput
+            placeholder="Tags (comma separated, e.g. tools, utility, game)"
+            value={tagsInput}
+            onChange={(e) => setTagsInput(e.currentTarget.value)}
             disabled={isLoading}
-            onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-            style={{ display: "block", marginTop: "8px", color: "#cbd5e1" }}
           />
-        </label>
+          <FileInput label="Application binary" placeholder="Select file" required disabled={isLoading} value={file} onChange={setFile} />
 
-        {statusMessage && <p style={{ color: "#3b82f6", fontSize: "14px", margin: 0 }}>{statusMessage}</p>}
+          {statusMessage && (
+            <Text size="sm" c="brand">
+              {statusMessage}
+            </Text>
+          )}
 
-        <div style={{ display: "flex", gap: "12px", marginTop: "16px" }}>
-          <button
-            type="submit"
-            disabled={isLoading}
-            style={{ flex: 1, padding: "12px", borderRadius: "8px", border: "none", backgroundColor: isLoading ? "#64748b" : "#10b981", color: "white", fontWeight: "bold", cursor: isLoading ? "not-allowed" : "pointer" }}
-          >
-            {isLoading ? "Publishing..." : "Publish to Blockchain"}
-          </button>
-          <button type="button" onClick={onCancel} disabled={isLoading} style={{ flex: 1, padding: "12px", borderRadius: "8px", border: "1px solid #64748b", backgroundColor: "transparent", color: "#cbd5e1", cursor: "pointer" }}>
-            Cancel
-          </button>
-        </div>
+          <Group mt="sm">
+            <Button type="submit" loading={isLoading} flex={1}>
+              Publish to Blockchain
+            </Button>
+            <Button type="button" variant="default" onClick={onCancel} disabled={isLoading} flex={1}>
+              Cancel
+            </Button>
+          </Group>
+        </Stack>
       </form>
-    </div>
+    </Paper>
   );
 }

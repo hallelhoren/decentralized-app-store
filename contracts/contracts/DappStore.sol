@@ -26,6 +26,11 @@ contract DecentralizedAppStore {
     mapping(uint256 => mapping(uint256 => Version)) public appVersions;
     mapping(uint256 => uint256) public versionCounts;
 
+    // Keyed by keccak256(name) rather than the raw string so the mapping key is a fixed-size
+    // type. Comparison is exact/case-sensitive - Solidity has no cheap case-folding for
+    // arbitrary UTF-8, so "MyApp" and "myapp" are treated as different names.
+    mapping(bytes32 => bool) public isNameTaken;
+
     // The address allowed to anchor aggregated review hashes (see updateReviews). This is the
     // Next.js cache server's own on-chain identity, per the team's design: the cache server is
     // untrusted for search/browse correctness (clients can always fall back to raw chain reads),
@@ -120,10 +125,14 @@ contract DecentralizedAppStore {
         bytes32 _shaDigest
     ) external {
         require(bytes(_name).length > 0, "App name cannot be empty");
-        
+
+        bytes32 nameHash = keccak256(bytes(_name));
+        require(!isNameTaken[nameHash], "App name already taken");
+        isNameTaken[nameHash] = true;
+
         appCount++;
         uint256 newAppId = appCount;
-        
+
         apps[newAppId] = App({
             appId: newAppId,
             publisher: msg.sender,
