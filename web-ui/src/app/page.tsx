@@ -1,55 +1,106 @@
 "use client";
-import { ethers } from "ethers";
-import ContractABI from "../../../contracts/artifacts/contracts/DappStore.sol/DecentralizedAppStore.json";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import AppList, { AppData } from "../components/AppList";
 import AppDetails from "../components/AppDetails";
 import UserProfile from "../components/UserProfile";
 import UploadAppForm from "../components/UploadAppForm";
 import DeveloperAppDetails from "../components/DeveloperAppDetails";
-import SearchBar from "../components/SearchBar";
+import SearchBar, { SearchFilters } from "../components/SearchBar";
 import { AppComment } from "../components/CommentsSection";
+import { connectWallet, getAlreadyConnectedAccount } from "../lib/blockchain";
 
-const INITIAL_STORE_APPS: AppData[] = [
-  { id: "1", name: "CryptoChess", description: "Decentralized chess game.", category: "Games", rating: 4.8, version: "1.0.4", contractAddress: "0x71C7...476B" },
-  { id: "2", name: "DeFiSwap", description: "Automated liquidity protocol.", category: "Finance", rating: 4.6, version: "2.1.0", contractAddress: "0xE592...564" },
-];
+interface ApiApp {
+  id: number;
+  publisher: string;
+  name: string;
+  description: string;
+  tags: string[];
+  latestVersionId: number;
+  averageRating: number;
+  ratingCount: number;
+  reportCount: number;
+  versions: { versionId: number; torrentRef: string; sha256Digest: string; publishedAt: string }[];
+}
+
+function toAppData(app: ApiApp): AppData {
+  return {
+    id: String(app.id),
+    name: app.name,
+    description: app.description,
+    category: app.tags[0] || "General",
+    tags: app.tags,
+    rating: Number(app.averageRating.toFixed(1)),
+    ratingCount: app.ratingCount,
+    reportCount: app.reportCount,
+    version: String(app.latestVersionId),
+    publisher: app.publisher,
+    versions: app.versions,
+  };
+}
 
 export default function Home() {
   const [activeTab, setActiveTab] = useState<"profile" | "store" | "dev">("profile");
-  
-  // States
-  const [allApps, setAllApps] = useState<AppData[]>(INITIAL_STORE_APPS);
-  const [myApps, setMyApps] = useState<AppData[]>([]);
+
+  const [allApps, setAllApps] = useState<AppData[]>([]);
   const [storeSelectedApp, setStoreSelectedApp] = useState<AppData | null>(null);
   const [devSelectedApp, setDevSelectedApp] = useState<AppData | null>(null);
   const [isUploading, setIsUploading] = useState(false);
-  const [searchTerm, setSearchTerm] = useState("");
+  const [filters, setFilters] = useState<SearchFilters>({ search: "", category: "", minRating: 0 });
   const [commentsMap, setCommentsMap] = useState<Record<string, AppComment[]>>({});
+  const [walletAddress, setWalletAddress] = useState<string | null>(null);
 
-  // Recalculate rating whenever comments change
-  const getUpdatedRating = (appId: string, currentRating: number, newComments: AppComment[]): number => {
-    const userReviews = newComments.filter(c => !c.isDeveloper && c.rating !== undefined);
-    if (userReviews.length === 0) return 0;
-    const sum = userReviews.reduce((acc, c) => acc + (c.rating || 0), 0);
-    return Number((sum / userReviews.length).toFixed(1));
-  };
+  const handleConnectWallet = useCallback(async () => {
+    try {
+      const address = await connectWallet();
+      setWalletAddress(address);
+    } catch (error: any) {
+      console.error("Failed to connect wallet:", error);
+      alert(error.message || "Failed to connect wallet");
+    }
+  }, []);
 
- // Safe fetch function with crash prevention
+  // Silently pick up a wallet the user already approved in a previous visit (eth_accounts
+  // never prompts). Without this, the Dev tab's Upload button - gated on walletAddress being
+  // set - stays hidden behind a "connect your wallet" message on every single page load, even
+  // for a user who already connected, making the whole upload feature look like it's missing.
+  useEffect(() => {
+    getAlreadyConnectedAccount().then((address) => {
+      if (address) setWalletAddress(address);
+    });
+  }, []);
+
+  // Search/browse now hits the Postgres-backed cache (GET /api/apps) instead of scanning the
+  // chain client-side - the cache is what the BlockchainListener (src/lib/blockchain-listener.ts)
+  // keeps in sync server-side.
+  const loadApps = useCallback(async () => {
+    try {
+      const params = new URLSearchParams();
+      if (filters.search) params.set("search", filters.search);
+      if (filters.category) params.set("category", filters.category);
+      if (filters.minRating) params.set("minRating", String(filters.minRating));
+
+      const res = await fetch(`/api/apps?${params.toString()}`);
+      if (!res.ok) throw new Error(`GET /api/apps failed: ${res.status}`);
+      const data = await res.json();
+      setAllApps((data.apps as ApiApp[]).map(toAppData));
+    } catch (error) {
+      console.error("Error loading apps:", error);
+    }
+  }, [filters]);
+
+  useEffect(() => {
+    loadApps();
+  }, [loadApps]);
+
   const fetchReviewsForApp = async (appId: string) => {
     try {
       const response = await fetch(`/api/reviews?appId=${appId}`);
-      
       if (!response.ok) {
         console.error("Server error or route not found:", response.status);
         return;
       }
 
-      const text = await response.text();
-      if (!text) return;
-
-      const data = JSON.parse(text);
-
+      const data = await response.json();
       if (data.success && data.reviews) {
         const formattedComments: AppComment[] = data.reviews.map((r: any, index: number) => ({
           id: `${r.timestamp}_${index}`,
@@ -58,21 +109,8 @@ export default function Home() {
           isDeveloper: r.isDeveloper || false,
           timestamp: r.timestamp,
         }));
-        
-        setCommentsMap(prev => ({
-          ...prev,
-          [appId]: formattedComments
-        }));
 
-        const newRating = getUpdatedRating(appId, 0, formattedComments);
-
-        setAllApps(apps => 
-          apps.map(a => a.id === appId ? { ...a, rating: newRating } : a)
-        );
-
-        setMyApps(apps => 
-          apps.map(a => a.id === appId ? { ...a, rating: newRating } : a)
-        );
+        setCommentsMap((prev) => ({ ...prev, [appId]: formattedComments }));
       }
     } catch (error) {
       console.error(`Failed to fetch reviews for app ${appId}:`, error);
@@ -80,62 +118,40 @@ export default function Home() {
   };
 
   useEffect(() => {
-    if (storeSelectedApp) {
-      fetchReviewsForApp(storeSelectedApp.id);
-    }
+    if (storeSelectedApp) fetchReviewsForApp(storeSelectedApp.id);
   }, [storeSelectedApp]);
 
-  // טעינת ביקורות ברגע שנבחרת אפליקציה באזור המפתחים
   useEffect(() => {
-    if (devSelectedApp) {
-      fetchReviewsForApp(devSelectedApp.id);
-    }
+    if (devSelectedApp) fetchReviewsForApp(devSelectedApp.id);
   }, [devSelectedApp]);
-  
 
-  const handleUploadApp = (newApp: AppData) => {
-    setMyApps([...myApps, newApp]);
-    setAllApps([...allApps, newApp,]);
+  const handleUploadSubmitted = () => {
     setIsUploading(false);
+    // Indexing happens async via the BlockchainListener poll loop - give it a moment before
+    // refreshing, rather than assuming the new app is already in Postgres.
+    setTimeout(loadApps, 4000);
   };
 
-  const loadAppsFromBlockchain = async () => {
-  try {
-    const provider = new ethers.JsonRpcProvider("http://127.0.0.1:8545");
-    const contractAddress = process.env.NEXT_PUBLIC_CONTRACT_ADDRESS!;
-    const contract = new ethers.Contract(contractAddress, ContractABI.abi, provider);
+  const handleVersionPublished = () => {
+    setTimeout(loadApps, 4000);
+  };
 
-    const filter = contract.filters.AppPublished();
-    const events = await contract.queryFilter(filter);
+  const myApps = useMemo(
+    () => (walletAddress ? allApps.filter((a) => a.publisher.toLowerCase() === walletAddress.toLowerCase()) : []),
+    [allApps, walletAddress]
+  );
 
-    const blockchainApps: AppData[] = events.map((event: any) => ({
-      id: event.args.appId.toString(),
-      name: event.args.name,
-      description: "App from Blockchain", 
-      category: "General",
-      rating: commentsMap[event.args.appId.toString()] ? getUpdatedRating(event.args.appId.toString(), 0, commentsMap[event.args.appId.toString()]) : 0,
-      version: "1.0.0",
-      contractAddress: event.args.publisher
-    }));
-
-    setAllApps(blockchainApps);
-  } catch (error) {
-    console.error("Error loading apps:", error);
-  }
-};
-
-  useEffect(() => {
-  loadAppsFromBlockchain();
-  }, []);
-
-  const filteredApps = allApps.filter(app => app.name.toLowerCase().includes(searchTerm.toLowerCase()));
+  const categories = useMemo(
+    () => Array.from(new Set(allApps.map((a) => a.category))).sort(),
+    [allApps]
+  );
 
   return (
     <div style={{ backgroundColor: "#0f172a", minHeight: "100vh", color: "#f8fafc", padding: "0 24px 60px 24px" }}>
       <header style={{ maxWidth: "1200px", margin: "0 auto", padding: "24px 0", borderBottom: "1px solid #1e293b", display: "flex", justifyContent: "space-between" }}>
         <h1>Decentralized App Store</h1>
         <nav style={{ display: "flex", gap: "16px" }}>
-          {["profile", "store", "dev"].map(tab => (
+          {["profile", "store", "dev"].map((tab) => (
             <button key={tab} onClick={() => setActiveTab(tab as any)} style={{ background: "none", border: "none", color: activeTab === tab ? "#3b82f6" : "#94a3b8", fontWeight: "bold", cursor: "pointer" }}>
               {tab.toUpperCase()}
             </button>
@@ -144,39 +160,48 @@ export default function Home() {
       </header>
 
       <main style={{ maxWidth: "1200px", margin: "40px auto" }}>
-        {activeTab === "profile" && <UserProfile appCount={myApps.length} />}
-        
+        {activeTab === "profile" && (
+          <UserProfile appCount={myApps.length} walletAddress={walletAddress} onConnectWallet={handleConnectWallet} />
+        )}
+
         {activeTab === "store" && (
           storeSelectedApp ? (
-            <AppDetails 
-              app={storeSelectedApp} 
-              onBack={() => setStoreSelectedApp(null)} 
-              comments={commentsMap[storeSelectedApp.id] || []} 
-              onReviewSubmitted={() => fetchReviewsForApp(storeSelectedApp.id)} 
+            <AppDetails
+              app={storeSelectedApp}
+              onBack={() => setStoreSelectedApp(null)}
+              comments={commentsMap[storeSelectedApp.id] || []}
+              onReviewSubmitted={() => fetchReviewsForApp(storeSelectedApp.id)}
+              reviewerAddress={walletAddress}
             />
           ) : (
             <>
-              <SearchBar onSearch={setSearchTerm} />
-              <AppList apps={filteredApps} onSelectApp={setStoreSelectedApp} />
+              <SearchBar filters={filters} categories={categories} onChange={setFilters} />
+              <AppList apps={allApps} onSelectApp={setStoreSelectedApp} />
             </>
           )
         )}
 
         {activeTab === "dev" && (
-          isUploading ? <UploadAppForm onCancel={() => setIsUploading(false)} onSubmit={handleUploadApp} /> :
-          devSelectedApp ? (
-            <DeveloperAppDetails 
-              app={devSelectedApp} 
-              onBack={() => setDevSelectedApp(null)} 
-              onUpdateVersion={(id, v) => setMyApps(prev => prev.map(a => a.id === id ? {...a, version: v} : a))} 
-              comments={commentsMap[devSelectedApp.id] || []} 
-              onReviewSubmitted={() => fetchReviewsForApp(devSelectedApp.id)} 
+          isUploading ? (
+            <UploadAppForm onCancel={() => setIsUploading(false)} onSubmit={handleUploadSubmitted} />
+          ) : devSelectedApp ? (
+            <DeveloperAppDetails
+              app={devSelectedApp}
+              onBack={() => setDevSelectedApp(null)}
+              onVersionPublished={handleVersionPublished}
+              comments={commentsMap[devSelectedApp.id] || []}
+              onReviewSubmitted={() => fetchReviewsForApp(devSelectedApp.id)}
+              reviewerAddress={walletAddress}
             />
           ) : (
-          <div>
-            <button onClick={() => setIsUploading(true)} style={{ marginBottom: "24px", padding: "10px 20px", backgroundColor: "#3b82f6", color: "white", border: "none", borderRadius: "8px", cursor: "pointer" }}>+ Upload App</button>
-            <AppList apps={myApps} onSelectApp={setDevSelectedApp} />
-          </div>
+            <div>
+              {!walletAddress ? (
+                <p style={{ color: "#94a3b8" }}>Connect your wallet from the Profile tab to publish apps.</p>
+              ) : (
+                <button onClick={() => setIsUploading(true)} style={{ marginBottom: "24px", padding: "10px 20px", backgroundColor: "#3b82f6", color: "white", border: "none", borderRadius: "8px", cursor: "pointer" }}>+ Upload App</button>
+              )}
+              <AppList apps={myApps} onSelectApp={setDevSelectedApp} />
+            </div>
           )
         )}
       </main>

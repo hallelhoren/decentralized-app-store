@@ -1,1 +1,0 @@
-export const activeDownloads = new Map<string, number>();

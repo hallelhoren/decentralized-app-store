@@ -1,2 +1,11 @@
 node_modules/
 .env
+all_directories.txt
+.venv/
+web-ui/.next/
+web-ui/directories.txt
+desktop-client/BITTORRENT_README.md
+desktop-client/TESTING.md
+desktop-client/desktop_client_directories.txt
+directory_list.txt
+web-ui/.env.local

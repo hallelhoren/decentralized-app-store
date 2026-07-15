@@ -3,14 +3,27 @@
 // This component will display a list of available dApps in the store. Each app will show its name, description, category, and rating.
 // When a user clicks on an app, it will navigate to the AppDetails component to show more information and allow downloading.
 
+export interface AppVersion {
+  versionId: number;
+  torrentRef: string;
+  sha256Digest: string;
+  publishedAt: string;
+}
+
+// Shape returned by GET /api/apps (a Prisma App row + its versions), which mirrors the
+// on-chain App struct plus cache-only rollups (averageRating/reportCount) computed server-side.
 export interface AppData {
   id: string;
   name: string;
   description: string;
   category: string;
+  tags: string[];
   rating: number;
+  ratingCount: number;
+  reportCount: number;
   version: string;
-  contractAddress: string;
+  publisher: string;
+  versions: AppVersion[];
 }
 
 interface AppListProps {

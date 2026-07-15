@@ -7,24 +7,57 @@ import { useState } from "react";
 import DownloadButton from "./DownloadButton";
 import { AppData } from "./AppList";
 import CommentsSection, { AppComment } from "./CommentsSection";
+import { getEthereumContractWithSigner } from "../lib/blockchain";
 
 interface DeveloperAppDetailsProps {
   app: AppData;
   onBack: () => void;
-  onUpdateVersion: (id: string, newVersion: string) => void;
+  onVersionPublished: () => void;
   comments: AppComment[];
   onReviewSubmitted: () => void;
+  reviewerAddress: string | null;
 }
 
-export default function DeveloperAppDetails({ app, onBack, onUpdateVersion, comments, onReviewSubmitted }: DeveloperAppDetailsProps) {
-  const [showUpdateForm, setShowUpdateForm] = useState(false);
-  const [newVersion, setNewVersion] = useState("");
+const DESKTOP_API_URL = process.env.NEXT_PUBLIC_DESKTOP_API_URL || "http://localhost:3001";
 
-  const handleUpdate = () => {
-    if (newVersion) {
-      onUpdateVersion(app.id, newVersion);
+export default function DeveloperAppDetails({ app, onBack, onVersionPublished, comments, onReviewSubmitted, reviewerAddress }: DeveloperAppDetailsProps) {
+  const [showUpdateForm, setShowUpdateForm] = useState(false);
+  const [newVersionFile, setNewVersionFile] = useState<File | null>(null);
+  const [isPublishing, setIsPublishing] = useState(false);
+  const [statusMessage, setStatusMessage] = useState("");
+
+  const handlePublishVersion = async () => {
+    if (!newVersionFile) {
+      alert("Select the updated binary to publish.");
+      return;
+    }
+
+    setIsPublishing(true);
+    try {
+      setStatusMessage("Hashing and seeding file via desktop client...");
+      const formData = new FormData();
+      formData.append("file", newVersionFile);
+
+      const uploadRes = await fetch(`${DESKTOP_API_URL}/api/upload`, { method: "POST", body: formData });
+      if (!uploadRes.ok) {
+        throw new Error(`Desktop client upload failed: ${await uploadRes.text()}`);
+      }
+      const { magnetLink, fileHash } = await uploadRes.json();
+
+      setStatusMessage("Sending transaction to the blockchain...");
+      const contract = await getEthereumContractWithSigner();
+      const tx = await contract.publishNewVersion(app.id, magnetLink, "0x" + fileHash);
+      await tx.wait();
+
       setShowUpdateForm(false);
-      setNewVersion("");
+      setNewVersionFile(null);
+      onVersionPublished();
+    } catch (error: any) {
+      console.error("Failed to publish new version:", error);
+      alert("Failed to publish new version: " + (error.reason || error.message));
+    } finally {
+      setIsPublishing(false);
+      setStatusMessage("");
     }
   };
 
@@ -44,7 +77,7 @@ export default function DeveloperAppDetails({ app, onBack, onUpdateVersion, comm
         </div>
 
         <p style={{ color: "#cbd5e1", marginBottom: "24px" }}>{app.description}</p>
-        
+
         <div style={{ backgroundColor: "#0f172a", padding: "16px", borderRadius: "8px", border: "1px dashed #3b82f6", marginBottom: "24px" }}>
           <h4 style={{ margin: "0 0 16px 0", color: "#3b82f6" }}>Developer Actions</h4>
           <div style={{ display: "flex", gap: "16px", flexDirection: "column" }}>
@@ -52,20 +85,31 @@ export default function DeveloperAppDetails({ app, onBack, onUpdateVersion, comm
             {!showUpdateForm ? (
               <button onClick={() => setShowUpdateForm(true)} style={{ padding: "12px", borderRadius: "8px", border: "1px solid #f59e0b", backgroundColor: "rgba(245, 158, 11, 0.1)", color: "#f59e0b", fontWeight: "bold", cursor: "pointer" }}>Upload New Version</button>
             ) : (
-              <div style={{ display: "flex", gap: "8px" }}>
-                <input placeholder="e.g. 1.0.1" value={newVersion} onChange={(e) => setNewVersion(e.target.value)} style={{ flex: 1, padding: "12px", borderRadius: "8px", border: "1px solid #334155", backgroundColor: "#1e293b", color: "white" }} />
-                <button onClick={handleUpdate} style={{ padding: "0 20px", borderRadius: "8px", border: "none", backgroundColor: "#f59e0b", color: "white", fontWeight: "bold", cursor: "pointer" }}>Save</button>
-                <button onClick={() => setShowUpdateForm(false)} style={{ padding: "0 20px", borderRadius: "8px", border: "1px solid #64748b", backgroundColor: "transparent", color: "#cbd5e1", cursor: "pointer" }}>Cancel</button>
+              <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                <input
+                  type="file"
+                  disabled={isPublishing}
+                  onChange={(e) => setNewVersionFile(e.target.files?.[0] ?? null)}
+                  style={{ color: "#cbd5e1" }}
+                />
+                {statusMessage && <p style={{ color: "#3b82f6", fontSize: "13px", margin: 0 }}>{statusMessage}</p>}
+                <div style={{ display: "flex", gap: "8px" }}>
+                  <button onClick={handlePublishVersion} disabled={isPublishing} style={{ padding: "0 20px", height: "40px", borderRadius: "8px", border: "none", backgroundColor: "#f59e0b", color: "white", fontWeight: "bold", cursor: isPublishing ? "not-allowed" : "pointer" }}>
+                    {isPublishing ? "Publishing..." : "Save"}
+                  </button>
+                  <button onClick={() => setShowUpdateForm(false)} disabled={isPublishing} style={{ padding: "0 20px", height: "40px", borderRadius: "8px", border: "1px solid #64748b", backgroundColor: "transparent", color: "#cbd5e1", cursor: "pointer" }}>Cancel</button>
+                </div>
               </div>
             )}
           </div>
         </div>
 
-        <CommentsSection 
+        <CommentsSection
           appId={app.id}
-          comments={comments} 
-          onReviewSubmitted={onReviewSubmitted} 
-          isDeveloperMode={true} 
+          comments={comments}
+          onReviewSubmitted={onReviewSubmitted}
+          isDeveloperMode={true}
+          reviewerAddress={reviewerAddress}
         />
       </div>
     </div>

@@ -1,27 +1,22 @@
-import { NextResponse } from 'next/server';
-import { activeDownloads } from '@/lib/store';
+import { NextResponse } from "next/server";
+import { getDesktopDownloadStatus } from "@/lib/desktop-client";
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
-  const appId = searchParams.get('appId');
+  const appId = searchParams.get("appId");
 
-  // Handle case where appId is missing
   if (!appId) {
-    return NextResponse.json({ status: "idle", progress: 0 });
+    return NextResponse.json({ status: "idle", progress: 0, verified: null });
   }
 
-  if (!activeDownloads.has(appId)) {
-    return NextResponse.json({ status: "idle", progress: 0 });
+  try {
+    const status = await getDesktopDownloadStatus(appId);
+    return NextResponse.json(status);
+  } catch (error) {
+    console.error("Error in GET /api/status:", error);
+    // The desktop client not being reachable yet (still starting up, or not running at all)
+    // is a very normal transient state here - report idle rather than a hard failure so the
+    // UI's poll loop keeps retrying instead of breaking.
+    return NextResponse.json({ status: "idle", progress: 0, verified: null });
   }
-
-  const startTime = activeDownloads.get(appId)!;
-  const elapsed = (Date.now() - startTime) / 1000;
-  const progress = Math.min(Math.floor(elapsed * 10), 100);
-
-  if (progress >= 100) {
-    activeDownloads.delete(appId);
-    return NextResponse.json({ status: "finished", progress: 100 });
-  }
-
-  return NextResponse.json({ status: "in_progress", progress });
 }

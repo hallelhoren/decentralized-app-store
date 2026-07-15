@@ -1,0 +1,77 @@
+// Local indexed database for the Next.js cache/wrapper server (Module B in the HLD).
+// This is a read-optimized *mirror* of on-chain state plus off-chain review text/ratings -
+// the blockchain (contracts/contracts/DappStore.sol) remains the source of truth for
+// everything except review free-text, which is aggregated and anchored back on-chain as a
+// hash (see updateReviews and src/lib/reviews-aggregator.ts).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Mirrors the on-chain App struct + a few cache-only fields (rating/report rollups) that
+// would be expensive to compute on-chain on every read.
+model App {
+  id                Int       @id // == on-chain appId, never auto-generated here
+  publisher         String
+  name              String
+  description       String
+  tags              String[]
+  latestVersionId   Int
+  latestReviewsHash String    @default("")
+  latestReviewsRef  String    @default("") // magnet link of the aggregated reviews blob
+  reportCount       Int       @default(0)
+  averageRating     Float     @default(0)
+  ratingCount       Int       @default(0)
+  publishedAt       DateTime
+  updatedAt         DateTime  @updatedAt
+
+  versions Version[]
+  reviews  Review[]
+
+  @@index([name])
+}
+
+// Mirrors the on-chain Version struct so version history/torrent refs can be listed without
+// a chain call per row.
+model Version {
+  id           Int      @id @default(autoincrement())
+  appId        Int
+  versionId    Int
+  torrentRef   String
+  sha256Digest String
+  publishedAt  DateTime
+
+  app App @relation(fields: [appId], references: [id])
+
+  @@unique([appId, versionId])
+}
+
+// Individual reviews as submitted by users. `aggregated` flags rows already folded into an
+// on-chain latestReviewsHash anchor (see the hash-chaining scheme from the meeting notes);
+// review text itself is never deleted, only marked, so the aggregation history stays honest.
+model Review {
+  id          Int      @id @default(autoincrement())
+  appId       Int
+  reviewer    String
+  rating      Int?
+  reviewText  String
+  isDeveloper Boolean  @default(false)
+  aggregated  Boolean  @default(false)
+  createdAt   DateTime @default(now())
+
+  app App @relation(fields: [appId], references: [id])
+
+  @@index([appId])
+}
+
+// Single-row table the BlockchainListener uses to resume from the last block it processed,
+// instead of re-scanning the whole chain from genesis on every server restart.
+model SyncState {
+  id        Int @id @default(1)
+  lastBlock Int @default(0)
+}
