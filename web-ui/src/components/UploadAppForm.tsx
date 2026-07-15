@@ -1,9 +1,10 @@
 "use client";
 
 import { useState } from "react";
-import { Button, FileInput, Group, Paper, Stack, Text, TextInput, Textarea, Title } from "@mantine/core";
+import { Button, FileInput, Group, Paper, Select, Stack, Text, TextInput, Textarea, Title } from "@mantine/core";
 import { getEthereumContractWithSigner } from "../lib/blockchain";
 import { fetchAllApps } from "../lib/apps-client";
+import { APP_CATEGORIES } from "../constants/categories";
 
 interface UploadAppFormProps {
   onCancel: () => void;
@@ -15,7 +16,7 @@ const DESKTOP_API_URL = process.env.NEXT_PUBLIC_DESKTOP_API_URL || "http://local
 export default function UploadAppForm({ onCancel, onSubmit }: UploadAppFormProps) {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
-  const [tagsInput, setTagsInput] = useState("");
+  const [category, setCategory] = useState<string | null>(null);
   const [file, setFile] = useState<File | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [statusMessage, setStatusMessage] = useState("");
@@ -24,6 +25,10 @@ export default function UploadAppForm({ onCancel, onSubmit }: UploadAppFormProps
     e.preventDefault();
     if (!file) {
       alert("Please select the application binary to publish.");
+      return;
+    }
+    if (!category) {
+      alert("Please select a category.");
       return;
     }
 
@@ -60,10 +65,10 @@ export default function UploadAppForm({ onCancel, onSubmit }: UploadAppFormProps
       setStatusMessage("Waiting for wallet...");
       const contract = await getEthereumContractWithSigner();
 
-      const tagsArray = tagsInput
-        .split(",")
-        .map((tag) => tag.trim())
-        .filter((tag) => tag.length > 0);
+      // The contract still just takes a string[] of tags, unchanged - the predefined-category
+      // restriction is enforced here at the UI level (the Select below), not on-chain, so this
+      // is still exactly the shape publishApp already expects.
+      const tagsArray = [category];
 
       const shaDigestBytes32 = "0x" + fileHash;
 
@@ -90,10 +95,13 @@ export default function UploadAppForm({ onCancel, onSubmit }: UploadAppFormProps
         <Stack gap="md">
           <TextInput placeholder="App Name" value={name} onChange={(e) => setName(e.currentTarget.value)} required disabled={isLoading} />
           <Textarea placeholder="Description" value={description} onChange={(e) => setDescription(e.currentTarget.value)} required minRows={4} disabled={isLoading} />
-          <TextInput
-            placeholder="Tags (comma separated, e.g. tools, utility, game)"
-            value={tagsInput}
-            onChange={(e) => setTagsInput(e.currentTarget.value)}
+          <Select
+            label="Category"
+            placeholder="Select a category"
+            data={[...APP_CATEGORIES]}
+            value={category}
+            onChange={setCategory}
+            required
             disabled={isLoading}
           />
           <FileInput label="Application binary" placeholder="Select file" required disabled={isLoading} value={file} onChange={setFile} />
