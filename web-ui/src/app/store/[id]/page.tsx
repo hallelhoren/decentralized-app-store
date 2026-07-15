@@ -7,6 +7,7 @@ import { AppData } from "../../../components/AppList";
 import DownloadButton from "../../../components/DownloadButton";
 import CommentsSection, { AppComment } from "../../../components/CommentsSection";
 import RatingStars from "../../../components/RatingStars";
+import VerifyBadge from "../../../components/VerifyBadge";
 import { getEthereumContractWithSigner } from "../../../lib/blockchain";
 import { fetchAllApps } from "../../../lib/apps-client";
 import { useWallet } from "../../../lib/wallet-context";
@@ -111,6 +112,9 @@ export default function StoreAppDetailPage() {
                 • ⚠ {app.reportCount} report{app.reportCount === 1 ? "" : "s"}
               </Text>
             )}
+          </Group>
+          <Group mt="xs">
+            <VerifyBadge appId={app.id} />
           </Group>
         </div>
 

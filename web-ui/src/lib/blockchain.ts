@@ -25,6 +25,16 @@ export function getBlockchainContract() {
   return contract;
 }
 
+/**
+ * Reads the Merkle root directly from the chain via a plain RPC call - deliberately not routed
+ * through the Next.js cache/API layer, since the whole point is comparing against a value the
+ * cache server had no chance to lie about. Used to verify GET /api/apps/[id]/proof responses.
+ */
+export async function getOnChainMerkleRoot(): Promise<string> {
+  const contract = getBlockchainContract();
+  return contract.merkleRoot();
+}
+
 // Hardhat Network's fixed chain id (31337 / 0x7a69). Every signing action needs MetaMask
 // actually pointed at this local chain first - otherwise "publish"/"report"/"review" silently
 // try to sign against whatever network MetaMask currently has selected (e.g. real Sepolia or
