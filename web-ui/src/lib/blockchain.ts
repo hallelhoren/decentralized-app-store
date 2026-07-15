@@ -36,6 +36,12 @@ export async function switchToLocalNetwork(): Promise<void> {
     throw new Error("MetaMask is not installed");
   }
 
+  // Every wallet-signing action calls this, so skip the wallet_switchEthereumChain round
+  // trip entirely when we're already on the right chain - otherwise every single button
+  // that signs (report/publish/upload) pays a real MetaMask RPC round trip for a no-op.
+  const currentChainId = await window.ethereum.request({ method: "eth_chainId" });
+  if (currentChainId === "0x7a69") return;
+
   try {
     await window.ethereum.request({
       method: "wallet_switchEthereumChain",
