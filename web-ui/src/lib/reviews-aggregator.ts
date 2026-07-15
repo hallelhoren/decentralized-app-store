@@ -1,18 +1,9 @@
-import { ethers } from "ethers";
 import crypto from "crypto";
 import { prisma } from "./db";
 import { seedContentOnDesktopClient } from "./desktop-client";
-import contractData from "../constants/DecentralizedAppStore.json";
+import { getAggregatorContract } from "./aggregator-wallet";
 
 export const AGGREGATION_THRESHOLD = 5;
-
-// Hardhat's well-known deterministic dev account #1 (mnemonic "test test test ... junk"),
-// used only as a zero-config default so a fresh local checkout can demo the full
-// review -> aggregate -> on-chain-anchor loop without any manual setup. Anything other than a
-// local Hardhat/Ganache chain MUST set AGGREGATOR_PRIVATE_KEY to a real, funded key and call
-// setAggregator() on-chain to match - this default is not safe to reuse anywhere public.
-const DEV_ONLY_AGGREGATOR_KEY =
-  "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d";
 
 /**
  * Implements the hash-chaining aggregation model the team designed: once enough new reviews
@@ -73,16 +64,7 @@ export async function maybeAggregateReviews(appId: number): Promise<void> {
 }
 
 async function anchorReviewsHashOnChain(appId: number, newReviewsHash: string, torrentRef: string) {
-  const rpcUrl = process.env.NEXT_PUBLIC_RPC_URL;
-  const contractAddress = process.env.NEXT_PUBLIC_CONTRACT_ADDRESS;
-  if (!rpcUrl || !contractAddress) {
-    throw new Error("Missing NEXT_PUBLIC_RPC_URL / NEXT_PUBLIC_CONTRACT_ADDRESS");
-  }
-
-  const provider = new ethers.JsonRpcProvider(rpcUrl);
-  const wallet = new ethers.Wallet(process.env.AGGREGATOR_PRIVATE_KEY || DEV_ONLY_AGGREGATOR_KEY, provider);
-  const contract = new ethers.Contract(contractAddress, contractData.abi, wallet);
-
+  const contract = getAggregatorContract();
   const tx = await contract.updateReviews(appId, newReviewsHash, torrentRef);
   await tx.wait();
   console.log(`[reviews-aggregator] anchored reviews hash for app ${appId}: ${newReviewsHash}`);

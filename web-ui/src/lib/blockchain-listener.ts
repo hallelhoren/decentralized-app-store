@@ -1,6 +1,8 @@
 import { ethers } from "ethers";
 import { prisma } from "./db";
 import contractData from "../constants/DecentralizedAppStore.json";
+import { buildAppTree, getRoot } from "./merkle";
+import { getAggregatorContract } from "./aggregator-wallet";
 
 const POLL_INTERVAL_MS = 4000;
 // Public RPC providers (Sepolia/Infura/Alchemy free tiers) commonly cap how many blocks a
@@ -98,6 +100,32 @@ export class BlockchainListener {
     await this.forEachRange(fromBlock, latestBlock, (from, to) => this.syncAppReported(from, to));
 
     await this.setLastBlock(latestBlock);
+
+    // Best-effort: a failed anchor just leaves the on-chain root stale until the next sync
+    // tick retries with the same (still-current) tree, rather than failing the whole sync.
+    await this.syncMerkleRoot().catch((err) =>
+      console.error("[BlockchainListener] failed to sync Merkle root:", err)
+    );
+  }
+
+  /**
+   * Rebuilds the Merkle tree over the current app listing and, if it changed since the last
+   * anchor, submits the new root on-chain - this is what lets a client verify the cache
+   * server's data against a value it read directly from the chain (see updateMerkleRoot in
+   * DappStore.sol and src/lib/merkle.ts).
+   */
+  private async syncMerkleRoot() {
+    const apps = await prisma.app.findMany({ include: { versions: true } });
+    const { layers } = buildAppTree(apps);
+    const newRoot = getRoot(layers);
+
+    const currentRoot: string = await this.contract.merkleRoot();
+    if (currentRoot.toLowerCase() === newRoot.toLowerCase()) return;
+
+    const aggregatorContract = getAggregatorContract();
+    const tx = await aggregatorContract.updateMerkleRoot(newRoot);
+    await tx.wait();
+    console.log(`[BlockchainListener] anchored new Merkle root over ${apps.length} apps: ${newRoot}`);
   }
 
   private async syncAppPublished(fromBlock: number, toBlock: number) {
