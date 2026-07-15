@@ -26,21 +26,36 @@ contract DecentralizedAppStore {
     mapping(uint256 => mapping(uint256 => Version)) public appVersions;
     mapping(uint256 => uint256) public versionCounts;
 
+    // The address allowed to anchor aggregated review hashes (see updateReviews). This is the
+    // Next.js cache server's own on-chain identity, per the team's design: the cache server is
+    // untrusted for search/browse correctness (clients can always fall back to raw chain reads),
+    // but review aggregation specifically requires *a* known signer so that `apps[id]` cannot be
+    // overwritten by an arbitrary address. The owner can rotate this if the server's key changes.
+    address public owner;
+    address public aggregator;
+
+    // Simple crowd-sourced malicious-app flagging. Deliberately does not remove or hide
+    // anything on its own - apps/reviews stay censorship-resistant/immutable; this only records
+    // a public signal (report count + reasons) that a client UI or off-chain moderation process
+    // can act on.
+    mapping(uint256 => uint256) public reportCount;
+    mapping(uint256 => mapping(address => bool)) public hasReported;
+
     // Events for Indexer and Sync Module (Next.js Cache Server)
     event AppPublished(
-        uint256 indexed appId, 
-        address indexed publisher, 
-        string name, 
-        string torrentRef, 
-        bytes32 shaDigest, 
+        uint256 indexed appId,
+        address indexed publisher,
+        string name,
+        string torrentRef,
+        bytes32 shaDigest,
         uint256 timestamp
     );
-    
+
     event VersionPublished(
-        uint256 indexed appId, 
-        uint256 indexed versionId, 
-        string torrentRef, 
-        bytes32 shaDigest, 
+        uint256 indexed appId,
+        uint256 indexed versionId,
+        string torrentRef,
+        bytes32 shaDigest,
         uint256 timestamp
     );
 
@@ -52,10 +67,48 @@ contract DecentralizedAppStore {
         uint256 timestamp
     );
 
+    event AppReported(
+        uint256 indexed appId,
+        address indexed reporter,
+        string reason,
+        uint256 newReportCount,
+        uint256 timestamp
+    );
+
+    event AggregatorChanged(address indexed previousAggregator, address indexed newAggregator);
+
     // Modifiers
     modifier onlyPublisher(uint256 _appId) {
         require(apps[_appId].publisher == msg.sender, "Not the app publisher");
         _;
+    }
+
+    modifier onlyOwner() {
+        require(msg.sender == owner, "Not the contract owner");
+        _;
+    }
+
+    modifier onlyAggregator() {
+        require(msg.sender == aggregator, "Not the authorized aggregator");
+        _;
+    }
+
+    modifier validApp(uint256 _appId) {
+        require(_appId > 0 && _appId <= appCount, "App does not exist");
+        _;
+    }
+
+    constructor() {
+        // The deployer is the initial aggregator too, so a local/demo deployment works without
+        // extra setup; call setAggregator to point it at the cache server's dedicated wallet.
+        owner = msg.sender;
+        aggregator = msg.sender;
+    }
+
+    function setAggregator(address _newAggregator) external onlyOwner {
+        require(_newAggregator != address(0), "Aggregator cannot be the zero address");
+        emit AggregatorChanged(aggregator, _newAggregator);
+        aggregator = _newAggregator;
     }
 
     // Core Functions
@@ -103,13 +156,25 @@ contract DecentralizedAppStore {
         uint256 _appId,
         bytes32 _newReviewsHash,
         string calldata _torrentRef
-    ) external {
-        require(_appId > 0 && _appId <= appCount, "App does not exist");
-        
+    ) external onlyAggregator validApp(_appId) {
         bytes32 oldHash = apps[_appId].latestReviewsHash;
         apps[_appId].latestReviewsHash = _newReviewsHash;
-        
+
         emit ReviewsAggregated(_appId, oldHash, _newReviewsHash, _torrentRef, block.timestamp);
+    }
+
+    /**
+     * @notice Flags an app as potentially malicious/censorable-worthy. Purely additive - it
+     * cannot delete or hide the app or its reviews, keeping the store censorship-resistant;
+     * it just gives clients and off-chain moderation tooling a public signal to act on.
+     */
+    function reportApp(uint256 _appId, string calldata _reason) external validApp(_appId) {
+        require(!hasReported[_appId][msg.sender], "You already reported this app");
+
+        hasReported[_appId][msg.sender] = true;
+        reportCount[_appId]++;
+
+        emit AppReported(_appId, msg.sender, _reason, reportCount[_appId], block.timestamp);
     }
 
     function publishNewVersion(
