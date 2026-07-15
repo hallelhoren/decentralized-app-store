@@ -71,7 +71,19 @@ export class BlockchainListener {
 
   async syncOnce() {
     const latestBlock = await this.provider.getBlockNumber();
-    const lastBlock = await this.getLastBlock();
+    let lastBlock = await this.getLastBlock();
+
+    // A real chain's height only ever increases, but a local Hardhat node resets to near-zero
+    // every time it's restarted. Without this, a restart leaves our cursor permanently ahead
+    // of the (now much shorter) chain, and syncOnce silently no-ops forever - nothing new ever
+    // gets indexed again until the chain organically grows past the stale cursor.
+    if (latestBlock < lastBlock) {
+      console.warn(
+        `[BlockchainListener] chain height (${latestBlock}) is behind our cursor (${lastBlock}) - the node looks like it was reset; resyncing from block 0`
+      );
+      lastBlock = 0;
+      await this.setLastBlock(0);
+    }
 
     if (latestBlock <= lastBlock) return;
 
