@@ -19,9 +19,10 @@ interface CommentsSectionProps {
   comments: AppComment[];
   onReviewSubmitted: (text: string, rating?: number) => void;
   isDeveloperMode: boolean;
+  reviewerAddress: string | null;
 }
 
-export default function CommentsSection({ appId, comments = [], onReviewSubmitted, isDeveloperMode }: CommentsSectionProps) {
+export default function CommentsSection({ appId, comments = [], onReviewSubmitted, isDeveloperMode, reviewerAddress }: CommentsSectionProps) {
   const [newComment, setNewComment] = useState("");
   const [rating, setRating] = useState(5);
   const [isLoading, setIsLoading] = useState(false); 
@@ -29,6 +30,10 @@ export default function CommentsSection({ appId, comments = [], onReviewSubmitte
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newComment.trim()) return;
+    if (!reviewerAddress) {
+      alert("Connect your wallet before posting a review.");
+      return;
+    }
 
     setIsLoading(true);
 
@@ -42,7 +47,7 @@ export default function CommentsSection({ appId, comments = [], onReviewSubmitte
           rating: isDeveloperMode ? undefined : rating,
           reviewText: newComment,
           isDeveloper: isDeveloperMode,
-          reviewer: "0xUserAddress...", // in a real app, this would be the user's wallet address or username
+          reviewer: reviewerAddress,
         }),
       });
 
