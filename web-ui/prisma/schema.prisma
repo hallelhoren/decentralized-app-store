@@ -24,7 +24,9 @@ model App {
   latestVersionId   Int
   latestReviewsHash String    @default("")
   latestReviewsRef  String    @default("") // magnet link of the aggregated reviews blob
-  reportCount       Int       @default(0)
+  latestReportsHash String    @default("")
+  latestReportsRef  String    @default("") // magnet link of the aggregated reports blob
+  reportCount       Int       @default(0) // cache-only rollup (like averageRating) - see reports-aggregator.ts
   averageRating     Float     @default(0)
   ratingCount       Int       @default(0)
   publishedAt       DateTime
@@ -32,6 +34,7 @@ model App {
 
   versions Version[]
   reviews  Review[]
+  reports  Report[]
 
   @@index([name])
 }
@@ -66,6 +69,32 @@ model Review {
 
   app App @relation(fields: [appId], references: [id])
 
+  @@index([appId])
+}
+
+// Individual reports as submitted by users, mirroring Review exactly: reports accumulate
+// off-chain (no gas cost, no on-chain transaction at submission time - see
+// api/reports/route.ts), and once enough pile up, reports-aggregator.ts hashes+seeds the full
+// history and anchors just that hash on-chain via updateReports. `aggregated` flags rows
+// already folded into an on-chain latestReportsHash anchor; report rows are never deleted, so
+// the full history stays servable from Postgres for the Reports tab. `signature` is the
+// reporter's signed proof of wallet ownership over (appId, reason) - required since, unlike the
+// old on-chain reportApp(), submitting a report is no longer a transaction the reporter's own
+// wallet had to sign and pay gas for; see lib/report-signing.ts for the exact signed message
+// and api/reports/route.ts for verification. The (appId, reporter) unique constraint replicates
+// the old on-chain hasReported mapping's one-report-per-wallet-per-app guarantee.
+model Report {
+  id         Int      @id @default(autoincrement())
+  appId      Int
+  reporter   String
+  reason     String
+  signature  String
+  aggregated Boolean  @default(false)
+  createdAt  DateTime @default(now())
+
+  app App @relation(fields: [appId], references: [id])
+
+  @@unique([appId, reporter])
   @@index([appId])
 }
 

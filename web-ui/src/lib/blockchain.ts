@@ -105,6 +105,20 @@ export async function getAlreadyConnectedAccount(): Promise<string | null> {
   return accounts[0] ?? null;
 }
 
+/**
+ * Returns a signer for the connected wallet, for plain message-signing that doesn't need a
+ * contract instance at all (e.g. proving report authorship off-chain - see
+ * lib/report-signing.ts and the report submission flow on the app details page).
+ */
+export async function getEthereumSigner() {
+  if (typeof window === "undefined" || !window.ethereum) {
+    throw new Error("MetaMask is not installed. Please install it to interact with the blockchain.");
+  }
+  await switchToLocalNetwork();
+  const provider = new ethers.BrowserProvider(window.ethereum);
+  return provider.getSigner();
+}
+
 export async function getEthereumContractWithSigner() {
   // Check if MetaMask (window.ethereum) is injected into the browser
   if (typeof window !== "undefined" && window.ethereum) {

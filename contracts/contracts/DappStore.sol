@@ -18,6 +18,7 @@ contract DecentralizedAppStore {
         string[] tags;
         uint256 latestVersionId;
         bytes32 latestReviewsHash; // Anchor point for aggregated P2P reviews
+        bytes32 latestReportsHash; // Anchor point for aggregated P2P reports - same pattern
     }
 
     // State Variables
@@ -77,6 +78,18 @@ contract DecentralizedAppStore {
         bytes32 oldReviewsHash,
         bytes32 newReviewsHash,
         string torrentRef, // Location of the new aggregated dataset in the P2P network
+        uint256 timestamp
+    );
+
+    // Reports use the exact same off-chain-aggregate-then-anchor-a-hash pattern as reviews
+    // (see updateReports below) - individual report reasons/counts are deliberately never
+    // put on-chain, same reasoning as reviews: only the hash needs to be trustless, the
+    // reportCount rollup itself is cache-only, same as averageRating (see merkle.ts).
+    event ReportsAggregated(
+        uint256 indexed appId,
+        bytes32 oldReportsHash,
+        bytes32 newReportsHash,
+        string torrentRef,
         uint256 timestamp
     );
 
@@ -150,7 +163,8 @@ contract DecentralizedAppStore {
             description: _description,
             tags: _tags,
             latestVersionId: 1, // Fixed: Added missing comma
-            latestReviewsHash: bytes32(0)
+            latestReviewsHash: bytes32(0),
+            latestReportsHash: bytes32(0)
         });
         
         appVersions[newAppId][1] = Version({
@@ -180,6 +194,27 @@ contract DecentralizedAppStore {
         apps[_appId].latestReviewsHash = _newReviewsHash;
 
         emit ReviewsAggregated(_appId, oldHash, _newReviewsHash, _torrentRef, block.timestamp);
+    }
+
+    /**
+     * @notice Updates the cryptographic report pointer using the same aggregation model as
+     * updateReviews - reports accumulate off-chain (no gas cost per report), and once enough
+     * pile up the full report history for this app is hashed+seeded and only that hash gets
+     * anchored here. The old per-report reportApp()/reportCount path above is left untouched
+     * for backward compatibility but is no longer called by the UI.
+     * @param _appId The target application ID.
+     * @param _newReportsHash The recomputed hash representing the full current report history.
+     * @param _torrentRef The BitTorrent magnet link where the aggregated reports file is seeded.
+     */
+    function updateReports(
+        uint256 _appId,
+        bytes32 _newReportsHash,
+        string calldata _torrentRef
+    ) external onlyAggregator validApp(_appId) {
+        bytes32 oldHash = apps[_appId].latestReportsHash;
+        apps[_appId].latestReportsHash = _newReportsHash;
+
+        emit ReportsAggregated(_appId, oldHash, _newReportsHash, _torrentRef, block.timestamp);
     }
 
     /**
