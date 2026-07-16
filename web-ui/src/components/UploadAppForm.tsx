@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { Button, FileInput, Group, Paper, Select, Stack, Text, TextInput, Textarea, Title } from "@mantine/core";
+import { useEffect, useState } from "react";
+import { Avatar, Button, FileInput, Group, Paper, Select, Stack, Text, TextInput, Textarea, Title } from "@mantine/core";
 import { getEthereumContractWithSigner } from "../lib/blockchain";
 import { fetchAllApps } from "../lib/apps-client";
 import { APP_CATEGORIES } from "../constants/categories";
@@ -12,14 +12,75 @@ interface UploadAppFormProps {
 }
 
 const DESKTOP_API_URL = process.env.NEXT_PUBLIC_DESKTOP_API_URL || "http://localhost:3001";
+const ALLOWED_ICON_TYPES = ["image/png", "image/jpeg"];
+const MAX_ICON_BYTES = 2 * 1024 * 1024;
+
+function fileToDataUri(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = () => reject(reader.error ?? new Error("Failed to read file"));
+    reader.readAsDataURL(file);
+  });
+}
+
+// The icon is never part of the on-chain publishApp() call - it's saved separately, right
+// after the transaction confirms and we know the new appId, and the App row it targets is
+// created by BlockchainListener's async indexing (can lag a few seconds behind), so a few
+// retries are expected in the normal case, not just on failure.
+async function uploadIconWithRetry(appId: number, iconDataUri: string): Promise<void> {
+  for (let attempt = 0; attempt < 8; attempt++) {
+    const res = await fetch(`/api/apps/${appId}/icon`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ icon: iconDataUri }),
+    });
+    if (res.ok) return;
+    if (res.status !== 409) {
+      console.error("Failed to upload app icon:", await res.text().catch(() => ""));
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+  }
+  console.error(`Failed to upload app icon for app ${appId}: app was never indexed`);
+}
 
 export default function UploadAppForm({ onCancel, onSubmit }: UploadAppFormProps) {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [category, setCategory] = useState<string | null>(null);
   const [file, setFile] = useState<File | null>(null);
+  const [icon, setIcon] = useState<File | null>(null);
+  const [iconPreviewUrl, setIconPreviewUrl] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [statusMessage, setStatusMessage] = useState("");
+
+  // Object URLs must be created/revoked explicitly (unlike data: URIs) - doing this in an
+  // effect keyed on `icon`, rather than inline in the render, means each preview URL is revoked
+  // (and only ever one exists at a time) instead of leaking a new one on every re-render.
+  useEffect(() => {
+    if (!icon) {
+      setIconPreviewUrl(null);
+      return;
+    }
+    const url = URL.createObjectURL(icon);
+    setIconPreviewUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [icon]);
+
+  const handleIconChange = (selected: File | null) => {
+    if (selected) {
+      if (!ALLOWED_ICON_TYPES.includes(selected.type)) {
+        alert("App icon must be a PNG or JPEG image.");
+        return;
+      }
+      if (selected.size > MAX_ICON_BYTES) {
+        alert("App icon must be 2MB or smaller.");
+        return;
+      }
+    }
+    setIcon(selected);
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -74,7 +135,34 @@ export default function UploadAppForm({ onCancel, onSubmit }: UploadAppFormProps
 
       setStatusMessage("Sending transaction to the blockchain...");
       const tx = await contract.publishApp(name, description, tagsArray, magnetLink, shaDigestBytes32);
-      await tx.wait();
+      const receipt = await tx.wait();
+
+      // The app itself is already successfully published on-chain at this point - the icon is
+      // a best-effort extra, so a failure attaching it must never surface as "publish failed".
+      if (icon) {
+        try {
+          // The new appId is only assigned once the transaction mines - parsed straight out of
+          // the receipt's own AppPublished log rather than waiting on BlockchainListener's
+          // polling to index it first, since we need it right now to attach the icon.
+          const publishedEvent = receipt.logs
+            .map((log: any) => {
+              try {
+                return contract.interface.parseLog(log);
+              } catch {
+                return null;
+              }
+            })
+            .find((parsed: any) => parsed?.name === "AppPublished");
+
+          if (publishedEvent) {
+            setStatusMessage("Uploading app icon...");
+            const iconDataUri = await fileToDataUri(icon);
+            await uploadIconWithRetry(Number(publishedEvent.args.appId), iconDataUri);
+          }
+        } catch (iconError) {
+          console.error("App published, but uploading its icon failed:", iconError);
+        }
+      }
 
       onSubmit();
     } catch (error: any) {
@@ -105,6 +193,21 @@ export default function UploadAppForm({ onCancel, onSubmit }: UploadAppFormProps
             disabled={isLoading}
           />
           <FileInput label="Application binary" placeholder="Select file" required disabled={isLoading} value={file} onChange={setFile} />
+
+          <Group align="flex-end">
+            <FileInput
+              label="App icon (optional)"
+              placeholder="PNG or JPEG, up to 2MB"
+              accept="image/png,image/jpeg"
+              disabled={isLoading}
+              value={icon}
+              onChange={handleIconChange}
+              style={{ flex: 1 }}
+            />
+            <Avatar src={iconPreviewUrl ?? undefined} radius="xl" size="lg">
+              {name ? name[0].toUpperCase() : "?"}
+            </Avatar>
+          </Group>
 
           {statusMessage && (
             <Text size="sm" c="brand">

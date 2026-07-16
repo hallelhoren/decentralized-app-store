@@ -7,10 +7,12 @@ export interface ApiApp {
   name: string;
   description: string;
   tags: string[];
+  icon: string | null;
   latestVersionId: number;
   averageRating: number;
   ratingCount: number;
   reportCount: number;
+  downloadCount: number;
   versions: { versionId: number; torrentRef: string; sha256Digest: string; publishedAt: string }[];
 }
 
@@ -21,9 +23,11 @@ export function toAppData(app: ApiApp): AppData {
     description: app.description,
     category: app.tags[0] || "General",
     tags: app.tags,
+    icon: app.icon,
     rating: Number(app.averageRating.toFixed(1)),
     ratingCount: app.ratingCount,
     reportCount: app.reportCount,
+    downloadCount: app.downloadCount,
     version: String(app.latestVersionId),
     publisher: app.publisher,
     publisherName: app.publisherName,

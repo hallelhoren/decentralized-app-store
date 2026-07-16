@@ -30,6 +30,11 @@ model App {
   downloadCount     Int       @default(0) // off-chain only - counts POST /api/download calls, never on-chain
   averageRating     Float     @default(0)
   ratingCount       Int       @default(0)
+  // Full "data:image/png;base64,..." / "data:image/jpeg;base64,..." URI, ready to drop straight
+  // into an <Avatar src>/<img> with no extra request - never part of the on-chain App struct,
+  // set by the developer after publishing (see api/apps/[id]/icon/route.ts). Null means no icon
+  // was ever uploaded; the UI falls back to a plain initial-letter avatar.
+  icon              String?
   publishedAt       DateTime
   updatedAt         DateTime  @updatedAt
 

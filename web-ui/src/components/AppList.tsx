@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { Badge, Card, SimpleGrid, Text, Title } from "@mantine/core";
+import { Avatar, Badge, Card, Group, SimpleGrid, Text, Title } from "@mantine/core";
 import RatingStars from "./RatingStars";
 
 export interface AppVersion {
@@ -19,6 +19,7 @@ export interface AppData {
   description: string;
   category: string;
   tags: string[];
+  icon: string | null;
   rating: number;
   ratingCount: number;
   reportCount: number;
@@ -57,9 +58,14 @@ export default function AppList({ apps, hrefBase, emptyMessage = "No apps to sho
           withBorder
           style={{ textDecoration: "none", color: "inherit" }}
         >
-          <Badge variant="light" color="brand" mb="sm">
-            {app.category}
-          </Badge>
+          <Group gap="sm" mb="sm">
+            <Avatar src={app.icon ?? undefined} radius="xl" size="md">
+              {app.name[0]?.toUpperCase()}
+            </Avatar>
+            <Badge variant="light" color="brand">
+              {app.category}
+            </Badge>
+          </Group>
           <Title order={4} mb={4}>
             {app.name}
           </Title>

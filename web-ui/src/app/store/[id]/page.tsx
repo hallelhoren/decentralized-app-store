@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import {
   Anchor,
+  Avatar,
   Badge,
   Button,
   Container,
@@ -135,7 +136,11 @@ export default function StoreAppDetailPage() {
       </Anchor>
 
       <Stack gap="md">
-        <div>
+        <Group align="flex-start" wrap="nowrap">
+          <Avatar src={app.icon ?? undefined} radius="xl" size="xl">
+            {app.name[0]?.toUpperCase()}
+          </Avatar>
+          <div>
           <Badge variant="light" color="brand" mb="xs">
             {app.category}
           </Badge>
@@ -157,7 +162,8 @@ export default function StoreAppDetailPage() {
           <Group mt="xs">
             <VerifyBadge appId={app.id} />
           </Group>
-        </div>
+          </div>
+        </Group>
 
         <Text>{app.description}</Text>
 
