@@ -145,6 +145,9 @@ export default function StoreAppDetailPage() {
             <Text size="sm" c="dimmed">
               • Version {app.version}
             </Text>
+            <Text size="sm" c="dimmed">
+              • ⬇ {app.downloadCount} download{app.downloadCount === 1 ? "" : "s"}
+            </Text>
             {app.reportCount > 0 && (
               <Text size="sm" c="orange">
                 • ⚠ {app.reportCount} report{app.reportCount === 1 ? "" : "s"}

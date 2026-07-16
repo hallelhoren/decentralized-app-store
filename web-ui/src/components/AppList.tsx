@@ -22,6 +22,7 @@ export interface AppData {
   rating: number;
   ratingCount: number;
   reportCount: number;
+  downloadCount: number;
   version: string;
   publisher: string;
   publisherName: string | null;
@@ -66,6 +67,9 @@ export default function AppList({ apps, hrefBase, emptyMessage = "No apps to sho
             {app.description}
           </Text>
           <RatingStars value={app.rating} count={app.ratingCount} />
+          <Text c="dimmed" size="xs" mt={4}>
+            ⬇ {app.downloadCount} download{app.downloadCount === 1 ? "" : "s"}
+          </Text>
         </Card>
       ))}
     </SimpleGrid>

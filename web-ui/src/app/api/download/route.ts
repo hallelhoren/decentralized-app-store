@@ -21,6 +21,13 @@ export async function POST(request: Request) {
     }
 
     const result = await startDesktopDownload(appId, latestVersion.torrentRef, latestVersion.sha256Digest);
+
+    // Best-effort and fire-and-forget: a failed count update shouldn't turn an otherwise
+    // successful download start into a 502 for the user.
+    prisma.app
+      .update({ where: { id: app.id }, data: { downloadCount: { increment: 1 } } })
+      .catch((err) => console.error(`Failed to increment downloadCount for app ${app.id}:`, err));
+
     return NextResponse.json(result);
   } catch (error) {
     console.error("Error in POST /api/download:", error);

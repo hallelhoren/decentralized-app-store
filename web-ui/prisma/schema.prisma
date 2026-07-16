@@ -27,6 +27,7 @@ model App {
   latestReportsHash String    @default("")
   latestReportsRef  String    @default("") // magnet link of the aggregated reports blob
   reportCount       Int       @default(0) // cache-only rollup (like averageRating) - see reports-aggregator.ts
+  downloadCount     Int       @default(0) // off-chain only - counts POST /api/download calls, never on-chain
   averageRating     Float     @default(0)
   ratingCount       Int       @default(0)
   publishedAt       DateTime
