@@ -81,8 +81,16 @@ export class BlockchainListener {
     // gets indexed again until the chain organically grows past the stale cursor.
     if (latestBlock < lastBlock) {
       console.warn(
-        `[BlockchainListener] chain height (${latestBlock}) is behind our cursor (${lastBlock}) - the node looks like it was reset; resyncing from block 0`
+        `[BlockchainListener] chain height (${latestBlock}) is behind our cursor (${lastBlock}) - the node looks like it was reset; wiping the local mirror and resyncing from block 0`
       );
+      // A reset chain's fresh contract deployment reassigns appId/versionId from scratch (its
+      // own appCount starts back at 0) - those numbers now refer to whatever unrelated apps get
+      // published on the new chain, not the old ones. Without clearing these tables first,
+      // replaying AppPublished(appId=1, ...) for a brand-new app would upsert straight onto the
+      // *old* app 1's row, silently overwriting its name/publisher/description. There's nothing
+      // worth reconciling from the old chain incarnation - it no longer exists - so start the
+      // mirror genuinely empty rather than leaving stale rows for new IDs to collide with.
+      await prisma.$transaction([prisma.review.deleteMany(), prisma.version.deleteMany(), prisma.app.deleteMany()]);
       lastBlock = 0;
       await this.setLastBlock(0);
     }
