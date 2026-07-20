@@ -64,6 +64,13 @@ const downloadsByAppId = new Map<string, DownloadState>();
 // the caller (the Next.js cache server, which reads it from its indexed DB) so this process
 // never needs its own blockchain RPC connection just to verify a file.
 app.post('/api/download', async (req: Request, res: Response) => {
+  // Hoisted so the catch block below can mark this as errored if downloadFile() itself
+  // rejects (e.g. the new metadata-resolution timeout in BitTorrentManager) - otherwise the
+  // bookkeeping entry registered just before that await would be left stuck forever with no
+  // torrentId and no error, which GET /api/status can't distinguish from "still in progress"
+  // and which the existing.error retry branch below would never unblock.
+  let state: DownloadState | undefined;
+
   try {
     const { appId, magnetLink, expectedHash } = req.body ?? {};
 
@@ -101,26 +108,26 @@ app.post('/api/download', async (req: Request, res: Response) => {
     // btManager.downloadFile()'s promise even resolves. If this bookkeeping entry were only
     // added after that await, the completion callback below would look it up, find nothing,
     // and silently skip verification.
-    const state: DownloadState = { appId, magnetLink, torrentId: '', savePath, expectedHash, verified: null };
+    state = { appId, magnetLink, torrentId: '', savePath, expectedHash, verified: null };
     downloadsByAppId.set(appId, state);
 
     const torrentId = await btManager.downloadFile(
       magnetLink,
       savePath,
       async (filePaths) => {
-        state.filePaths = filePaths;
+        state!.filePaths = filePaths;
         if (expectedHash && filePaths.length > 0) {
           try {
-            state.verified = await HashVerifier.verifyFileHash(filePaths[0], expectedHash);
-            console.log(`[${appId}] hash verification ${state.verified ? 'PASSED' : 'FAILED'}`);
+            state!.verified = await HashVerifier.verifyFileHash(filePaths[0], expectedHash);
+            console.log(`[${appId}] hash verification ${state!.verified ? 'PASSED' : 'FAILED'}`);
           } catch (err) {
             console.error(`[${appId}] hash verification error:`, err);
-            state.verified = false;
+            state!.verified = false;
           }
         }
       },
       (err) => {
-        state.error = err.message;
+        state!.error = err.message;
       }
     );
 
@@ -129,6 +136,9 @@ app.post('/api/download', async (req: Request, res: Response) => {
     res.json({ status: 'started', appId, torrentId, savePath });
   } catch (error) {
     console.error('Download endpoint error:', error);
+    if (state) {
+      state.error = error instanceof Error ? error.message : String(error);
+    }
     res.status(500).json({ error: 'Failed to start download', details: String(error) });
   }
 });

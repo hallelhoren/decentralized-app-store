@@ -35,6 +35,7 @@ describe("DecentralizedAppStore", function () {
       expect(app.name).to.equal("CryptoChess");
       expect(app.latestVersionId).to.equal(1);
       expect(app.latestReviewsHash).to.equal(ethers.ZeroHash);
+      expect(app.latestReportsHash).to.equal(ethers.ZeroHash);
 
       const version = await store.getVersion(1, 1);
       expect(version.torrentRef).to.equal("magnet:?xt=1");
@@ -144,6 +145,55 @@ describe("DecentralizedAppStore", function () {
       await expect(
         store.connect(reviewer).setAggregator(aggregator.address)
       ).to.be.revertedWith("Not the contract owner");
+    });
+  });
+
+  // updateReports mirrors updateReviews exactly - reports, like reviews, are aggregated
+  // off-chain and only anchored on-chain as a hash (see web-ui/src/lib/reports-aggregator.ts).
+  describe("updateReports", function () {
+    it("defaults the aggregator to the deployer and lets it anchor a new reports hash", async function () {
+      const { store, owner, publisher } = await loadFixture(deployFixture);
+      await store.connect(publisher).publishApp("App1", "d", [], "magnet:1", SHA_DIGEST);
+
+      const newHash = ethers.keccak256(ethers.toUtf8Bytes("reports-v1"));
+
+      await expect(store.connect(owner).updateReports(1, newHash, "magnet:reports-1"))
+        .to.emit(store, "ReportsAggregated")
+        .withArgs(1, ethers.ZeroHash, newHash, "magnet:reports-1", anyValue);
+
+      expect((await store.getApp(1)).latestReportsHash).to.equal(newHash);
+    });
+
+    it("rejects calls from anyone other than the current aggregator", async function () {
+      const { store, publisher, reviewer } = await loadFixture(deployFixture);
+      await store.connect(publisher).publishApp("App1", "d", [], "magnet:1", SHA_DIGEST);
+
+      await expect(
+        store.connect(reviewer).updateReports(1, ethers.ZeroHash, "magnet:reports-1")
+      ).to.be.revertedWith("Not the authorized aggregator");
+    });
+
+    it("rejects updates for a non-existent app", async function () {
+      const { store, owner } = await loadFixture(deployFixture);
+
+      await expect(
+        store.connect(owner).updateReports(999, ethers.ZeroHash, "magnet:reports-1")
+      ).to.be.revertedWith("App does not exist");
+    });
+
+    it("does not affect latestReviewsHash - the two hash anchors are independent", async function () {
+      const { store, owner, publisher } = await loadFixture(deployFixture);
+      await store.connect(publisher).publishApp("App1", "d", [], "magnet:1", SHA_DIGEST);
+
+      const reviewsHash = ethers.keccak256(ethers.toUtf8Bytes("reviews-v1"));
+      const reportsHash = ethers.keccak256(ethers.toUtf8Bytes("reports-v1"));
+
+      await store.connect(owner).updateReviews(1, reviewsHash, "magnet:reviews-1");
+      await store.connect(owner).updateReports(1, reportsHash, "magnet:reports-1");
+
+      const app = await store.getApp(1);
+      expect(app.latestReviewsHash).to.equal(reviewsHash);
+      expect(app.latestReportsHash).to.equal(reportsHash);
     });
   });
 

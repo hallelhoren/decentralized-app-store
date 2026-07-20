@@ -47,11 +47,17 @@ export class BitTorrentManager {
     magnetLink: string,
     savePath: string,
     onDone?: (filePaths: string[]) => void,
-    onError?: (err: Error) => void
+    onError?: (err: Error) => void,
+    timeoutMs: number = 15000
   ): Promise<string> {
     if (!this.client) {
       throw new Error('BitTorrent client not initialized. Call initialize() first.');
     }
+
+    // Declared outside the try block so both the timeout callback and the catch clause below
+    // can share and cancel the same timer, regardless of which path settles the promise first.
+    let settled = false;
+    let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
 
     return new Promise((resolve, reject) => {
       try {
@@ -60,7 +66,28 @@ export class BitTorrentManager {
           fs.mkdirSync(dir, { recursive: true });
         }
 
+        // A malformed magnet link (or one whose metadata never resolves via DHT/trackers
+        // within a reasonable window) can leave this callback never firing at all - without
+        // this, the promise would hang forever and so would every caller awaiting it. Only
+        // guards the metadata-resolution step below; once we have a real torrent object, the
+        // existing 'done'/'error' handling takes over.
+        timeoutHandle = setTimeout(() => {
+          if (settled) return;
+          settled = true;
+          reject(new Error(`Timed out after ${timeoutMs}ms waiting for torrent metadata to resolve (magnetLink=${magnetLink})`));
+        }, timeoutMs);
+
         this.client!.add(magnetLink, { path: dir }, (torrent) => {
+          if (settled) {
+            // Metadata resolved after we already gave up and rejected - don't act on it as if
+            // this were still the caller's in-flight request; just drop it from the client so
+            // it doesn't keep seeding/downloading on behalf of a caller that's moved on.
+            this.client!.remove(torrent, { destroyStore: false }, () => {});
+            return;
+          }
+          settled = true;
+          clearTimeout(timeoutHandle);
+
           const torrentId = torrent.infoHash;
           this.torrents.set(torrentId, torrent);
 
@@ -147,6 +174,8 @@ export class BitTorrentManager {
           resolve(torrentId);
         });
       } catch (error) {
+        settled = true;
+        clearTimeout(timeoutHandle);
         reject(error);
       }
     });
