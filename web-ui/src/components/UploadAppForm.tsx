@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { Avatar, Button, FileInput, Group, Paper, Select, Stack, Text, TextInput, Textarea, Title } from "@mantine/core";
 import { getEthereumContractWithSigner } from "../lib/blockchain";
-import { fetchAllApps } from "../lib/apps-client";
+import { fetchAllApps, postWithRetryUntilIndexed } from "../lib/apps-client";
 import { APP_CATEGORIES } from "../constants/categories";
 
 interface UploadAppFormProps {
@@ -22,27 +22,6 @@ function fileToDataUri(file: File): Promise<string> {
     reader.onerror = () => reject(reader.error ?? new Error("Failed to read file"));
     reader.readAsDataURL(file);
   });
-}
-
-// The icon is never part of the on-chain publishApp() call - it's saved separately, right
-// after the transaction confirms and we know the new appId, and the App row it targets is
-// created by BlockchainListener's async indexing (can lag a few seconds behind), so a few
-// retries are expected in the normal case, not just on failure.
-async function uploadIconWithRetry(appId: number, iconDataUri: string): Promise<void> {
-  for (let attempt = 0; attempt < 8; attempt++) {
-    const res = await fetch(`/api/apps/${appId}/icon`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ icon: iconDataUri }),
-    });
-    if (res.ok) return;
-    if (res.status !== 409) {
-      console.error("Failed to upload app icon:", await res.text().catch(() => ""));
-      return;
-    }
-    await new Promise((resolve) => setTimeout(resolve, 1000));
-  }
-  console.error(`Failed to upload app icon for app ${appId}: app was never indexed`);
 }
 
 export default function UploadAppForm({ onCancel, onSubmit }: UploadAppFormProps) {
@@ -157,7 +136,9 @@ export default function UploadAppForm({ onCancel, onSubmit }: UploadAppFormProps
           if (publishedEvent) {
             setStatusMessage("Uploading app icon...");
             const iconDataUri = await fileToDataUri(icon);
-            await uploadIconWithRetry(Number(publishedEvent.args.appId), iconDataUri);
+            await postWithRetryUntilIndexed(`/api/apps/${Number(publishedEvent.args.appId)}/icon`, {
+              icon: iconDataUri,
+            });
           }
         } catch (iconError) {
           console.error("App published, but uploading its icon failed:", iconError);

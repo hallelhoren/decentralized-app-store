@@ -40,6 +40,7 @@ export default function StoreAppDetailPage() {
   const [loading, setLoading] = useState(true);
   const [isReportModalOpen, setIsReportModalOpen] = useState(false);
   const [reportReason, setReportReason] = useState("");
+  const [reportError, setReportError] = useState<string | null>(null);
   const [reportsRefreshKey, setReportsRefreshKey] = useState(0);
 
   const loadApp = async () => {
@@ -80,6 +81,7 @@ export default function StoreAppDetailPage() {
     if (!reason) return;
 
     setIsReporting(true);
+    setReportError(null);
     try {
       // No transaction, no gas: the reporter just signs a plain message proving wallet
       // ownership over this exact (appId, reason) pair - the report itself is stored off-chain
@@ -94,6 +96,10 @@ export default function StoreAppDetailPage() {
         body: JSON.stringify({ appId: id, reason, signature }),
       });
       if (!res.ok) {
+        if (res.status === 409) {
+          setReportError("A report has already been submitted from this account. You cannot report again.");
+          return;
+        }
         const body = await res.json().catch(() => null);
         throw new Error(body?.error || "Failed to submit report");
       }
@@ -106,7 +112,7 @@ export default function StoreAppDetailPage() {
       setReportsRefreshKey((k) => k + 1);
     } catch (error: any) {
       console.error("Failed to report app:", error);
-      alert("Failed to submit report: " + (error.reason || error.message));
+      setReportError(error.reason || error.message || "Failed to submit report.");
     } finally {
       setIsReporting(false);
     }
@@ -173,11 +179,18 @@ export default function StoreAppDetailPage() {
 
         {app.versions.length > 0 && (
           <Spoiler maxHeight={0} showLabel={`Version history (${app.versions.length})`} hideLabel="Hide">
-            <Stack gap="xs">
+            <Stack gap="sm">
               {app.versions.map((v) => (
-                <Text key={v.versionId} size="xs" ff="monospace" c="dimmed">
-                  v{v.versionId} — {new Date(v.publishedAt).toLocaleDateString()} — torrent: {v.torrentRef || "(none)"} — sha256: {v.sha256Digest}
-                </Text>
+                <div key={v.versionId}>
+                  <Text size="xs" ff="monospace" c="dimmed">
+                    v{v.versionId} — {new Date(v.publishedAt).toLocaleDateString()} — torrent: {v.torrentRef || "(none)"} — sha256: {v.sha256Digest}
+                  </Text>
+                  {v.releaseNotes && (
+                    <Text size="sm" mt={2}>
+                      {v.releaseNotes}
+                    </Text>
+                  )}
+                </div>
               ))}
             </Stack>
           </Spoiler>
@@ -185,7 +198,14 @@ export default function StoreAppDetailPage() {
 
         <Group>
           <DownloadButton appId={app.id} />
-          <Button variant="outline" color="red" onClick={() => setIsReportModalOpen(true)}>
+          <Button
+            variant="outline"
+            color="red"
+            onClick={() => {
+              setReportError(null);
+              setIsReportModalOpen(true);
+            }}
+          >
             🚩 Report app
           </Button>
         </Group>
@@ -212,7 +232,14 @@ export default function StoreAppDetailPage() {
         </Tabs>
       </Stack>
 
-      <Modal opened={isReportModalOpen} onClose={() => setIsReportModalOpen(false)} title="Report this app">
+      <Modal
+        opened={isReportModalOpen}
+        onClose={() => {
+          setIsReportModalOpen(false);
+          setReportError(null);
+        }}
+        title="Report this app"
+      >
         <Stack gap="sm">
           <Textarea
             placeholder="Why are you reporting this app? (e.g. malware, scam, broken)"
@@ -222,8 +249,20 @@ export default function StoreAppDetailPage() {
             autosize
             required
           />
+          {reportError && (
+            <Text size="sm" c="red">
+              {reportError}
+            </Text>
+          )}
           <Group justify="flex-end">
-            <Button variant="default" onClick={() => setIsReportModalOpen(false)} disabled={isReporting}>
+            <Button
+              variant="default"
+              onClick={() => {
+                setIsReportModalOpen(false);
+                setReportError(null);
+              }}
+              disabled={isReporting}
+            >
               Cancel
             </Button>
             <Button color="red" onClick={handleReportSubmit} loading={isReporting} disabled={!reportReason.trim()}>

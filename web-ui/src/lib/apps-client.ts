@@ -13,7 +13,13 @@ export interface ApiApp {
   ratingCount: number;
   reportCount: number;
   downloadCount: number;
-  versions: { versionId: number; torrentRef: string; sha256Digest: string; publishedAt: string }[];
+  versions: {
+    versionId: number;
+    torrentRef: string;
+    sha256Digest: string;
+    publishedAt: string;
+    releaseNotes: string | null;
+  }[];
 }
 
 export function toAppData(app: ApiApp): AppData {
@@ -46,4 +52,27 @@ export async function fetchAllApps(): Promise<AppData[]> {
   if (!res.ok) throw new Error(`GET /api/apps failed: ${res.status}`);
   const data = await res.json();
   return (data.apps as ApiApp[]).map(toAppData);
+}
+
+/**
+ * POSTs to a route that may briefly 409 while BlockchainListener's async indexing catches up
+ * with a transaction that just confirmed (e.g. attaching an icon or release notes right after
+ * publishApp()/publishNewVersion() mines) - retries a few times on 409 specifically, since
+ * that's what these routes return for "the row isn't indexed yet", then gives up.
+ */
+export async function postWithRetryUntilIndexed(url: string, body: unknown): Promise<void> {
+  for (let attempt = 0; attempt < 8; attempt++) {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (res.ok) return;
+    if (res.status !== 409) {
+      console.error(`POST ${url} failed:`, await res.text().catch(() => ""));
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+  }
+  console.error(`POST ${url} failed: target was never indexed`);
 }

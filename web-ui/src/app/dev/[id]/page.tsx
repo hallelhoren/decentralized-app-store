@@ -2,12 +2,12 @@
 
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { Anchor, Badge, Button, Container, FileInput, Group, Loader, Stack, Text, Title } from "@mantine/core";
+import { Alert, Anchor, Badge, Button, Container, FileInput, Group, Loader, Stack, Text, Textarea, Title } from "@mantine/core";
 import { AppData } from "../../../components/AppList";
 import DownloadButton from "../../../components/DownloadButton";
 import CommentsSection, { AppComment } from "../../../components/CommentsSection";
 import { getEthereumContractWithSigner } from "../../../lib/blockchain";
-import { fetchAllApps } from "../../../lib/apps-client";
+import { fetchAllApps, postWithRetryUntilIndexed } from "../../../lib/apps-client";
 import { useWallet } from "../../../lib/wallet-context";
 
 const DESKTOP_API_URL = process.env.NEXT_PUBLIC_DESKTOP_API_URL || "http://localhost:3001";
@@ -22,8 +22,10 @@ export default function DevAppDetailPage() {
   const [loading, setLoading] = useState(true);
   const [showUpdateForm, setShowUpdateForm] = useState(false);
   const [newVersionFile, setNewVersionFile] = useState<File | null>(null);
+  const [releaseNotes, setReleaseNotes] = useState("");
   const [isPublishing, setIsPublishing] = useState(false);
   const [statusMessage, setStatusMessage] = useState("");
+  const [publishSuccess, setPublishSuccess] = useState(false);
 
   const loadApp = async () => {
     const apps = await fetchAllApps();
@@ -65,6 +67,7 @@ export default function DevAppDetailPage() {
     }
 
     setIsPublishing(true);
+    setPublishSuccess(false);
     try {
       setStatusMessage("Hashing and seeding file via desktop client...");
       const formData = new FormData();
@@ -79,10 +82,40 @@ export default function DevAppDetailPage() {
       setStatusMessage("Sending transaction to the blockchain...");
       const contract = await getEthereumContractWithSigner();
       const tx = await contract.publishNewVersion(app.id, magnetLink, "0x" + fileHash);
-      await tx.wait();
+      const receipt = await tx.wait();
+
+      // Release notes are never part of the on-chain call - saved separately, right after the
+      // transaction confirms and we know the new versionId. A failure here must never surface
+      // as "publish failed", since the version itself is already live on-chain by this point.
+      const trimmedNotes = releaseNotes.trim();
+      if (trimmedNotes) {
+        try {
+          const publishedEvent = receipt.logs
+            .map((log: any) => {
+              try {
+                return contract.interface.parseLog(log);
+              } catch {
+                return null;
+              }
+            })
+            .find((parsed: any) => parsed?.name === "VersionPublished");
+
+          if (publishedEvent) {
+            setStatusMessage("Saving release notes...");
+            await postWithRetryUntilIndexed(
+              `/api/apps/${app.id}/versions/${Number(publishedEvent.args.versionId)}/notes`,
+              { releaseNotes: trimmedNotes }
+            );
+          }
+        } catch (notesError) {
+          console.error("Version published, but saving its release notes failed:", notesError);
+        }
+      }
 
       setShowUpdateForm(false);
       setNewVersionFile(null);
+      setReleaseNotes("");
+      setPublishSuccess(true);
       setTimeout(loadApp, 4000);
     } catch (error: any) {
       console.error("Failed to publish new version:", error);
@@ -136,12 +169,28 @@ export default function DevAppDetailPage() {
           <DownloadButton appId={app.id} />
 
           {!showUpdateForm ? (
-            <Button variant="light" color="orange" onClick={() => setShowUpdateForm(true)}>
+            <Button
+              variant="light"
+              color="orange"
+              onClick={() => {
+                setShowUpdateForm(true);
+                setPublishSuccess(false);
+              }}
+            >
               Upload New Version
             </Button>
           ) : (
             <Stack gap="xs">
               <FileInput placeholder="Select updated binary" disabled={isPublishing} value={newVersionFile} onChange={setNewVersionFile} />
+              <Textarea
+                label="Release notes (optional)"
+                placeholder="What's new in this version?"
+                value={releaseNotes}
+                onChange={(e) => setReleaseNotes(e.currentTarget.value)}
+                disabled={isPublishing}
+                minRows={3}
+                autosize
+              />
               {statusMessage && (
                 <Text size="xs" c="brand">
                   {statusMessage}
@@ -156,6 +205,12 @@ export default function DevAppDetailPage() {
                 </Button>
               </Group>
             </Stack>
+          )}
+
+          {publishSuccess && (
+            <Alert color="green" title="Version published" withCloseButton onClose={() => setPublishSuccess(false)}>
+              New version published successfully! It will appear in the version history shortly.
+            </Alert>
           )}
         </Stack>
 

@@ -53,6 +53,9 @@ model Version {
   versionId    Int
   torrentRef   String
   sha256Digest String
+  // Developer-supplied "what's new" text - off-chain only, never part of the on-chain Version
+  // struct, set after publishNewVersion() confirms (see api/apps/[id]/versions/[versionId]/notes).
+  releaseNotes String?
   publishedAt  DateTime
 
   app App @relation(fields: [appId], references: [id])

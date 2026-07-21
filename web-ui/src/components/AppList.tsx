@@ -9,6 +9,7 @@ export interface AppVersion {
   torrentRef: string;
   sha256Digest: string;
   publishedAt: string;
+  releaseNotes: string | null;
 }
 
 // Shape returned by GET /api/apps (a Prisma App row + its versions), which mirrors the
