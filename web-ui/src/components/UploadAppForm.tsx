@@ -87,8 +87,8 @@ export default function UploadAppForm({ onCancel, onSubmit }: UploadAppFormProps
         return;
       }
 
-      // 1. Hand the real file to the desktop client: it hashes it (SHA-256) and starts
-      // seeding it over BitTorrent, returning the magnet link + hash to anchor on-chain.
+      // Hand the real file to the desktop client: it hashes it (SHA-256) and starts seeding
+      // it over BitTorrent, returning the magnet link + hash to anchor on-chain.
       setStatusMessage("Hashing and seeding file via desktop client...");
       const formData = new FormData();
       formData.append("file", file);

@@ -147,27 +147,27 @@ export default function StoreAppDetailPage() {
             {app.name[0]?.toUpperCase()}
           </Avatar>
           <div>
-          <Badge variant="light" color="brand" mb="xs">
-            {app.category}
-          </Badge>
-          <Title order={2}>{app.name}</Title>
-          <Group gap="xs" mt={4}>
-            <RatingStars value={app.rating} count={app.ratingCount} />
-            <Text size="sm" c="dimmed">
-              • Version {app.version}
-            </Text>
-            <Text size="sm" c="dimmed">
-              • ⬇ {app.downloadCount} download{app.downloadCount === 1 ? "" : "s"}
-            </Text>
-            {app.reportCount > 0 && (
-              <Text size="sm" c="orange">
-                • ⚠ {app.reportCount} report{app.reportCount === 1 ? "" : "s"}
+            <Badge variant="light" color="brand" mb="xs">
+              {app.category}
+            </Badge>
+            <Title order={2}>{app.name}</Title>
+            <Group gap="xs" mt={4}>
+              <RatingStars value={app.rating} count={app.ratingCount} />
+              <Text size="sm" c="dimmed">
+                • Version {app.version}
               </Text>
-            )}
-          </Group>
-          <Group mt="xs">
-            <VerifyBadge appId={app.id} />
-          </Group>
+              <Text size="sm" c="dimmed">
+                • ⬇ {app.downloadCount} download{app.downloadCount === 1 ? "" : "s"}
+              </Text>
+              {app.reportCount > 0 && (
+                <Text size="sm" c="orange">
+                  • ⚠ {app.reportCount} report{app.reportCount === 1 ? "" : "s"}
+                </Text>
+              )}
+            </Group>
+            <Group mt="xs">
+              <VerifyBadge appId={app.id} />
+            </Group>
           </div>
         </Group>
 

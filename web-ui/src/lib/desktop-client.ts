@@ -1,7 +1,7 @@
 // Thin server-side client for the desktop app's local Express API (desktop-client/local-api.ts).
-// Centralizing these calls here is what makes the Next.js /api/download and /api/status route
-// handlers actual proxies instead of the timer-based fakes they used to be - and lets the
-// reviews-aggregation flow seed its aggregated blob the same way an app binary gets seeded.
+// Centralizing these calls here keeps the Next.js /api/download and /api/status routes as
+// plain proxies, and lets the aggregation flows seed their blobs the same way an app binary
+// gets seeded.
 
 const DESKTOP_API_URL = process.env.NEXT_PUBLIC_DESKTOP_API_URL || "http://localhost:3001";
 
@@ -47,7 +47,10 @@ export async function getDesktopDownloadStatus(appId: string): Promise<DesktopSt
   return res.json();
 }
 
-/** Raw response for a completed download's file bytes, for the /api/download/file route to stream through as-is (status, headers, and body all pass through unchanged). */
+/**
+ * Raw response for a completed download's file bytes - the /api/download/file route streams
+ * this through as-is, so its status, headers, and body all pass through unchanged.
+ */
 export async function fetchDesktopDownloadFile(appId: string): Promise<Response> {
   return fetch(`${DESKTOP_API_URL}/api/download/file?appId=${encodeURIComponent(appId)}`);
 }

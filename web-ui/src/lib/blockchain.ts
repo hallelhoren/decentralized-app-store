@@ -12,15 +12,8 @@ export function getBlockchainContract() {
     throw new Error("Missing blockchain environment configuration");
   }
 
-  // Create a provider pointing to the local node running in your terminal
   const provider = new ethers.JsonRpcProvider(rpcUrl);
-
-  // Initialize the contract object using address, ABI, and provider
-  const contract = new ethers.Contract(
-    contractAddress,
-    contractData.abi,
-    provider
-  );
+  const contract = new ethers.Contract(contractAddress, contractData.abi, provider);
 
   return contract;
 }
@@ -120,26 +113,19 @@ export async function getEthereumSigner() {
 }
 
 export async function getEthereumContractWithSigner() {
-  // Check if MetaMask (window.ethereum) is injected into the browser
-  if (typeof window !== "undefined" && window.ethereum) {
-    // 1. Make sure we're signing against the local chain, not whatever network the wallet
-    // happens to be on - the user may have switched networks after connecting, so this can't
-    // only happen once at connect-time.
-    await switchToLocalNetwork();
-
-    // 2. Initialize BrowserProvider using the MetaMask object
-    const provider = new ethers.BrowserProvider(window.ethereum);
-
-    // 3. Request account access from the user and retrieve the Signer (the current active wallet)
-    const signer = await provider.getSigner();
-
-    // 4. Fetch the contract address from environment variables
-    const contractAddress = process.env.NEXT_PUBLIC_CONTRACT_ADDRESS;
-    if (!contractAddress) throw new Error("Missing contract address configuration");
-
-    // 5. Return the contract instance mapped directly to the active signer
-    return new ethers.Contract(contractAddress, contractData.abi, signer);
-  } else {
+  if (typeof window === "undefined" || !window.ethereum) {
     throw new Error("MetaMask is not installed. Please install it to interact with the blockchain.");
   }
+
+  // The user may have switched networks after connecting, so this can't only happen once at
+  // connect-time - every signing action needs to re-check.
+  await switchToLocalNetwork();
+
+  const provider = new ethers.BrowserProvider(window.ethereum);
+  const signer = await provider.getSigner();
+
+  const contractAddress = process.env.NEXT_PUBLIC_CONTRACT_ADDRESS;
+  if (!contractAddress) throw new Error("Missing contract address configuration");
+
+  return new ethers.Contract(contractAddress, contractData.abi, signer);
 }

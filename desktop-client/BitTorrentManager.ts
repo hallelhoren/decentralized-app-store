@@ -117,12 +117,15 @@ export class BitTorrentManager {
             });
           }, 1000);
 
+          // client.add() can dedupe onto an already-registered torrent (e.g. one this same
+          // process is seeding) whose 'done' event already fired in the past, so guard against
+          // handling completion twice.
           let doneHandled = false;
           const handleDone = () => {
-            if (doneHandled) return; // client.add() can dedupe onto an already-registered
-            doneHandled = true;      // torrent (e.g. one this same process is seeding) whose
-            clearInterval(progressInterval); // 'done' event already fired in the past - guard
-            console.log(`[${torrentId}] Download completed`);             // against double-fire.
+            if (doneHandled) return;
+            doneHandled = true;
+            clearInterval(progressInterval);
+            console.log(`[${torrentId}] Download completed`);
 
             this.progressMap.set(torrentId, {
               id: torrentId,

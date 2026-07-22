@@ -32,11 +32,11 @@ contract DecentralizedAppStore {
     // arbitrary UTF-8, so "MyApp" and "myapp" are treated as different names.
     mapping(bytes32 => bool) public isNameTaken;
 
-    // The address allowed to anchor aggregated review hashes (see updateReviews). This is the
-    // Next.js cache server's own on-chain identity, per the team's design: the cache server is
-    // untrusted for search/browse correctness (clients can always fall back to raw chain reads),
-    // but review aggregation specifically requires *a* known signer so that `apps[id]` cannot be
-    // overwritten by an arbitrary address. The owner can rotate this if the server's key changes.
+    // The address allowed to anchor aggregated review/report hashes and the Merkle root (see
+    // updateReviews, updateReports, updateMerkleRoot). The cache server is untrusted for
+    // search/browse correctness - clients can always fall back to raw chain reads - but these
+    // aggregation writes require a known signer so `apps[id]` can't be overwritten by an
+    // arbitrary address. The owner can rotate this if the server's key changes.
     address public owner;
     address public aggregator;
 
@@ -48,11 +48,9 @@ contract DecentralizedAppStore {
     mapping(uint256 => mapping(address => bool)) public hasReported;
 
     // Root of a Merkle tree over the cache server's current app listing (see
-    // web-ui/src/lib/merkle.ts), anchored here so a client can verify the cache server's data
-    // against a value it did NOT get from the cache server itself - reading this one field
-    // directly from chain is what makes "verification does not rely on trusting the cache
-    // server" (see the HLD) actually true instead of just asserted. The aggregator re-submits
-    // this any time the underlying app data changes, same trust boundary as updateReviews.
+    // web-ui/src/lib/merkle.ts). A client reads this directly from the chain and verifies a
+    // proof against it, so search/browse results can be checked without trusting the cache
+    // server. The aggregator re-submits this whenever the underlying app data changes.
     bytes32 public merkleRoot;
 
     // Events for Indexer and Sync Module (Next.js Cache Server)
@@ -77,14 +75,12 @@ contract DecentralizedAppStore {
         uint256 indexed appId,
         bytes32 oldReviewsHash,
         bytes32 newReviewsHash,
-        string torrentRef, // Location of the new aggregated dataset in the P2P network
+        string torrentRef,
         uint256 timestamp
     );
 
-    // Reports use the exact same off-chain-aggregate-then-anchor-a-hash pattern as reviews
-    // (see updateReports below) - individual report reasons/counts are deliberately never
-    // put on-chain, same reasoning as reviews: only the hash needs to be trustless, the
-    // reportCount rollup itself is cache-only, same as averageRating (see merkle.ts).
+    // Reports use the same off-chain-aggregate-then-anchor-a-hash pattern as reviews (see
+    // updateReports): individual reasons are never stored on-chain, only a hash anchor.
     event ReportsAggregated(
         uint256 indexed appId,
         bytes32 oldReportsHash,
@@ -162,20 +158,20 @@ contract DecentralizedAppStore {
             name: _name,
             description: _description,
             tags: _tags,
-            latestVersionId: 1, // Fixed: Added missing comma
+            latestVersionId: 1,
             latestReviewsHash: bytes32(0),
             latestReportsHash: bytes32(0)
         });
-        
+
         appVersions[newAppId][1] = Version({
             versionId: 1,
             torrentRef: _torrentRef,
             sha256Digest: _shaDigest,
             timestamp: block.timestamp
         });
-        
+
         versionCounts[newAppId] = 1;
-        
+
         emit AppPublished(newAppId, msg.sender, _name, _torrentRef, _shaDigest, block.timestamp);
     }
 
@@ -198,10 +194,8 @@ contract DecentralizedAppStore {
 
     /**
      * @notice Updates the cryptographic report pointer using the same aggregation model as
-     * updateReviews - reports accumulate off-chain (no gas cost per report), and once enough
-     * pile up the full report history for this app is hashed+seeded and only that hash gets
-     * anchored here. The old per-report reportApp()/reportCount path above is left untouched
-     * for backward compatibility but is no longer called by the UI.
+     * updateReviews - reports accumulate off-chain, and once enough pile up the full report
+     * history for this app is hashed and seeded, with only that hash anchored here.
      * @param _appId The target application ID.
      * @param _newReportsHash The recomputed hash representing the full current report history.
      * @param _torrentRef The BitTorrent magnet link where the aggregated reports file is seeded.
@@ -251,16 +245,16 @@ contract DecentralizedAppStore {
     ) external onlyPublisher(_appId) {
         versionCounts[_appId]++;
         uint256 newVersionId = versionCounts[_appId];
-        
+
         appVersions[_appId][newVersionId] = Version({
             versionId: newVersionId,
             torrentRef: _torrentRef,
             sha256Digest: _shaDigest,
             timestamp: block.timestamp
         });
-        
+
         apps[_appId].latestVersionId = newVersionId;
-        
+
         emit VersionPublished(_appId, newVersionId, _torrentRef, _shaDigest, block.timestamp);
     }
 
