@@ -1,6 +1,8 @@
 import { ethers } from "ethers";
 import { prisma } from "./db";
 import contractData from "../constants/DecentralizedAppStore.json";
+import { buildAppTree, getRoot } from "./merkle";
+import { getAggregatorContract } from "./aggregator-wallet";
 
 const POLL_INTERVAL_MS = 4000;
 // Public RPC providers (Sepolia/Infura/Alchemy free tiers) commonly cap how many blocks a
@@ -79,8 +81,21 @@ export class BlockchainListener {
     // gets indexed again until the chain organically grows past the stale cursor.
     if (latestBlock < lastBlock) {
       console.warn(
-        `[BlockchainListener] chain height (${latestBlock}) is behind our cursor (${lastBlock}) - the node looks like it was reset; resyncing from block 0`
+        `[BlockchainListener] chain height (${latestBlock}) is behind our cursor (${lastBlock}) - the node looks like it was reset; wiping the local mirror and resyncing from block 0`
       );
+      // A reset chain's fresh contract deployment reassigns appId/versionId from scratch (its
+      // own appCount starts back at 0) - those numbers now refer to whatever unrelated apps get
+      // published on the new chain, not the old ones. Without clearing these tables first,
+      // replaying AppPublished(appId=1, ...) for a brand-new app would upsert straight onto the
+      // *old* app 1's row, silently overwriting its name/publisher/description. There's nothing
+      // worth reconciling from the old chain incarnation - it no longer exists - so start the
+      // mirror genuinely empty rather than leaving stale rows for new IDs to collide with.
+      await prisma.$transaction([
+        prisma.report.deleteMany(),
+        prisma.review.deleteMany(),
+        prisma.version.deleteMany(),
+        prisma.app.deleteMany(),
+      ]);
       lastBlock = 0;
       await this.setLastBlock(0);
     }
@@ -90,14 +105,44 @@ export class BlockchainListener {
     const fromBlock = lastBlock + 1;
 
     // Process in dependency order: AppPublished creates the App row that VersionPublished /
-    // ReviewsAggregated / AppReported updates depend on (the contract itself enforces that
-    // those calls can't target a non-existent appId, so this ordering is always safe).
+    // ReviewsAggregated / ReportsAggregated / AppReported updates depend on (the contract
+    // itself enforces that those calls can't target a non-existent appId, so this ordering is
+    // always safe).
     await this.forEachRange(fromBlock, latestBlock, (from, to) => this.syncAppPublished(from, to));
     await this.forEachRange(fromBlock, latestBlock, (from, to) => this.syncVersionPublished(from, to));
     await this.forEachRange(fromBlock, latestBlock, (from, to) => this.syncReviewsAggregated(from, to));
+    await this.forEachRange(fromBlock, latestBlock, (from, to) => this.syncReportsAggregated(from, to));
+    // Legacy path: reportApp()/AppReported is no longer called by the UI (see
+    // reports-aggregator.ts), but left wired in case anything ever calls it directly on-chain.
     await this.forEachRange(fromBlock, latestBlock, (from, to) => this.syncAppReported(from, to));
 
     await this.setLastBlock(latestBlock);
+
+    // Best-effort: a failed anchor just leaves the on-chain root stale until the next sync
+    // tick retries with the same (still-current) tree, rather than failing the whole sync.
+    await this.syncMerkleRoot().catch((err) =>
+      console.error("[BlockchainListener] failed to sync Merkle root:", err)
+    );
+  }
+
+  /**
+   * Rebuilds the Merkle tree over the current app listing and, if it changed since the last
+   * anchor, submits the new root on-chain - this is what lets a client verify the cache
+   * server's data against a value it read directly from the chain (see updateMerkleRoot in
+   * DappStore.sol and src/lib/merkle.ts).
+   */
+  private async syncMerkleRoot() {
+    const apps = await prisma.app.findMany({ include: { versions: true } });
+    const { layers } = buildAppTree(apps);
+    const newRoot = getRoot(layers);
+
+    const currentRoot: string = await this.contract.merkleRoot();
+    if (currentRoot.toLowerCase() === newRoot.toLowerCase()) return;
+
+    const aggregatorContract = getAggregatorContract();
+    const tx = await aggregatorContract.updateMerkleRoot(newRoot);
+    await tx.wait();
+    console.log(`[BlockchainListener] anchored new Merkle root over ${apps.length} apps: ${newRoot}`);
   }
 
   private async syncAppPublished(fromBlock: number, toBlock: number) {
@@ -211,6 +256,35 @@ export class BlockchainListener {
     }
   }
 
+  private async syncReportsAggregated(fromBlock: number, toBlock: number) {
+    const logs = await this.contract.queryFilter(
+      this.contract.filters.ReportsAggregated(),
+      fromBlock,
+      toBlock
+    );
+
+    for (const log of logs) {
+      const event = log as ethers.EventLog;
+      const appId = Number(event.args.appId);
+
+      await prisma.app.update({
+        where: { id: appId },
+        data: {
+          latestReportsHash: event.args.newReportsHash,
+          latestReportsRef: event.args.torrentRef,
+        },
+      });
+
+      console.log(`[BlockchainListener] indexed ReportsAggregated appId=${appId}`);
+    }
+  }
+
+  // Legacy: reportApp()/AppReported is no longer submitted by the UI (see
+  // reports-aggregator.ts for the current off-chain-then-aggregate flow). Report now requires a
+  // signature (proof of authorship for the new off-chain flow) that an on-chain event never
+  // had, and reportCount is owned by refreshReportCount()'s rollup, not this event - so this is
+  // now just a tripwire in case the old on-chain function is ever actually called again, not a
+  // real sync path.
   private async syncAppReported(fromBlock: number, toBlock: number) {
     const logs = await this.contract.queryFilter(
       this.contract.filters.AppReported(),
@@ -222,12 +296,9 @@ export class BlockchainListener {
       const event = log as ethers.EventLog;
       const appId = Number(event.args.appId);
 
-      await prisma.app.update({
-        where: { id: appId },
-        data: { reportCount: Number(event.args.newReportCount) },
-      });
-
-      console.log(`[BlockchainListener] indexed AppReported appId=${appId}`);
+      console.warn(
+        `[BlockchainListener] legacy AppReported event fired for appId=${appId} - the UI no longer calls reportApp() directly, so this was likely called manually against the contract and is NOT reflected in the Reports tab or reportCount.`
+      );
     }
   }
 }

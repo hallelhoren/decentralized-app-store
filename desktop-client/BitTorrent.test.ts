@@ -3,6 +3,7 @@ import HashVerifier from './HashVerifier';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+import * as crypto from 'crypto';
 
 describe('BitTorrentManager', () => {
   let btManager: BitTorrentManager;
@@ -72,24 +73,34 @@ describe('BitTorrentManager', () => {
     await expect(btManager.destroy()).resolves.not.toThrow();
   });
 
-  test('should create download directory if it does not exist', async () => {
+  test('should create the download directory before attempting to add the torrent', async () => {
     await btManager.initialize();
 
     const tempDir = path.join(os.tmpdir(), `test_download_${Date.now()}`);
     const testMagnetLink = 'magnet:?xt=urn:btih:test';
 
-    // This will attempt to add to client, which will fail with invalid magnet,
-    // but we're testing directory creation
-    try {
-      await btManager.downloadFile(testMagnetLink, tempDir);
-    } catch (error) {
-      // Expected to fail with invalid magnet link
-    }
+    // A malformed infohash like this one leaves WebTorrent's client.add() callback never
+    // firing - covered by the dedicated timeout test below. Here we only care that the
+    // directory gets created synchronously before that, so a short timeoutMs keeps this fast.
+    await btManager.downloadFile(testMagnetLink, tempDir, undefined, undefined, 500).catch(() => {});
 
-    // Check that the directory was attempted to be created
-    // (it may not exist if the torrent client rejected it immediately)
-    // This is a best-effort test
-    expect(true).toBe(true);
+    expect(fs.existsSync(tempDir)).toBe(true);
+  });
+
+  test('CRITICAL: downloadFile rejects with a timeout instead of hanging forever on unresolvable torrent metadata', async () => {
+    // This is the exact bug that was found and fixed: a magnet link whose metadata never
+    // resolves (malformed infohash, or no reachable peers/trackers/DHT) used to leave
+    // client.add()'s callback never firing, so the promise never settled. Uses a short
+    // timeoutMs override so this test itself stays fast rather than waiting out the real
+    // 15s production default.
+    await btManager.initialize();
+
+    const tempDir = path.join(os.tmpdir(), `test_timeout_${Date.now()}`);
+    const unresolvableMagnetLink = 'magnet:?xt=urn:btih:test';
+
+    await expect(
+      btManager.downloadFile(unresolvableMagnetLink, tempDir, undefined, undefined, 500)
+    ).rejects.toThrow(/Timed out after 500ms/);
   });
 });
 
@@ -182,6 +193,29 @@ describe('HashVerifier', () => {
     fs.unlinkSync(testFile);
   });
 
+  test('CRITICAL: rejects a file that was tampered with/corrupted after its hash was recorded', async () => {
+    // Simulates the real threat model this exists for: a malicious peer serving substitute
+    // content, or a corrupted P2P transfer. We hash a known-good file (as the on-chain
+    // sha256Digest would have been computed at publish time), then mutate the file's bytes on
+    // disk exactly as if a bad download had landed there, and confirm verifyFileHash correctly
+    // refuses to treat it as authentic against the original, still-trusted hash.
+    const testFile = path.join(testDir, 'tamper_test.bin');
+    const originalContent = Buffer.from('This is the original, trusted application binary.');
+
+    fs.writeFileSync(testFile, originalContent);
+    const trustedHash = await HashVerifier.calculateFileHash(testFile);
+
+    const mutatedContent = Buffer.from(originalContent);
+    mutatedContent[0] = mutatedContent[0] ^ 0xff; // flip a single byte - the smallest possible corruption
+    fs.writeFileSync(testFile, mutatedContent);
+
+    const isValid = await HashVerifier.verifyFileHash(testFile, trustedHash);
+
+    expect(isValid).toBe(false);
+
+    fs.unlinkSync(testFile);
+  });
+
   test('should return false for non-existent file during verification', async () => {
     const nonExistentFile = path.join(testDir, 'non_existent.txt');
     const hash = 'a'.repeat(64);
@@ -238,7 +272,10 @@ describe('HashVerifier', () => {
 });
 
 describe('Integration Tests', () => {
-  test('should allow seeding a local file after initialization', async () => {
+  test('should seed a local file and produce a well-formed magnet link', async () => {
+    // Seeding is a purely local operation - WebTorrent hashes the file and builds torrent
+    // metadata without needing any peers/trackers/DHT to respond, so this must succeed
+    // deterministically rather than tolerating failure as a "network issue".
     const btManager = new BitTorrentManager();
     const testDir = path.join(os.tmpdir(), `integration_test_${Date.now()}`);
     const testFile = path.join(testDir, 'app.zip');
@@ -248,16 +285,11 @@ describe('Integration Tests', () => {
       fs.writeFileSync(testFile, Buffer.alloc(1000)); // 1KB dummy file
 
       await btManager.initialize();
-      
-      // This will attempt to seed, might fail due to network but should not crash
-      try {
-        const magnetLink = await btManager.seedFile(testFile);
-        expect(magnetLink).toBeDefined();
-        expect(magnetLink.startsWith('magnet:')).toBe(true);
-      } catch (error) {
-        // Network-related errors are acceptable in testing
-        expect(error).toBeDefined();
-      }
+
+      const magnetLink = await btManager.seedFile(testFile);
+
+      // A real BitTorrent v1 magnet link: 40 hex character infohash under the xt= param.
+      expect(magnetLink).toMatch(/^magnet:\?xt=urn:btih:[a-f0-9]{40}/i);
 
       await btManager.destroy();
     } finally {
@@ -266,6 +298,46 @@ describe('Integration Tests', () => {
       }
     }
   });
+
+  test('P2P pipeline: a file seeded and then downloaded via its own magnet link resolves to byte-identical content', async () => {
+    // Proves the full seed -> magnet link -> resolve pipeline with real (non-mocked)
+    // WebTorrent logic: the same client both seeds the source file and then "downloads" it
+    // again via the resulting magnet link into a separate directory. WebTorrent dedupes the
+    // download onto the torrent it's already fully seeding (see BitTorrentManager.ts's own
+    // comments on this exact behavior), so this needs no network/peers to complete - but it
+    // still genuinely exercises magnet link parsing, torrent resolution, and the real
+    // file-copy path that a true remote download would also go through.
+    const btManager = new BitTorrentManager();
+    const uploadDir = path.join(os.tmpdir(), `p2p_seed_${Date.now()}`);
+    const downloadDir = path.join(os.tmpdir(), `p2p_download_${Date.now()}`);
+    const sourceFile = path.join(uploadDir, 'app.bin');
+    const originalContent = crypto.randomBytes(64 * 1024);
+
+    try {
+      fs.mkdirSync(uploadDir, { recursive: true });
+      fs.writeFileSync(sourceFile, originalContent);
+
+      await btManager.initialize();
+
+      const magnetLink = await btManager.seedFile(sourceFile);
+
+      let resolvedFilePaths: string[] = [];
+      await btManager.downloadFile(magnetLink, downloadDir, (filePaths) => {
+        resolvedFilePaths = filePaths;
+      });
+
+      expect(resolvedFilePaths).toHaveLength(1);
+      expect(fs.existsSync(resolvedFilePaths[0])).toBe(true);
+
+      const resolvedContent = fs.readFileSync(resolvedFilePaths[0]);
+      expect(resolvedContent.equals(originalContent)).toBe(true);
+
+      await btManager.destroy();
+    } finally {
+      fs.rmSync(uploadDir, { recursive: true, force: true });
+      fs.rmSync(downloadDir, { recursive: true, force: true });
+    }
+  }, 20000);
 
   test('should calculate hash and prepare for upload', async () => {
     const testDir = path.join(os.tmpdir(), `upload_test_${Date.now()}`);

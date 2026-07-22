@@ -12,17 +12,20 @@ export function getBlockchainContract() {
     throw new Error("Missing blockchain environment configuration");
   }
 
-  // Create a provider pointing to the local node running in your terminal
   const provider = new ethers.JsonRpcProvider(rpcUrl);
-
-  // Initialize the contract object using address, ABI, and provider
-  const contract = new ethers.Contract(
-    contractAddress,
-    contractData.abi,
-    provider
-  );
+  const contract = new ethers.Contract(contractAddress, contractData.abi, provider);
 
   return contract;
+}
+
+/**
+ * Reads the Merkle root directly from the chain via a plain RPC call - deliberately not routed
+ * through the Next.js cache/API layer, since the whole point is comparing against a value the
+ * cache server had no chance to lie about. Used to verify GET /api/apps/[id]/proof responses.
+ */
+export async function getOnChainMerkleRoot(): Promise<string> {
+  const contract = getBlockchainContract();
+  return contract.merkleRoot();
 }
 
 // Hardhat Network's fixed chain id (31337 / 0x7a69). Every signing action needs MetaMask
@@ -95,27 +98,34 @@ export async function getAlreadyConnectedAccount(): Promise<string | null> {
   return accounts[0] ?? null;
 }
 
-export async function getEthereumContractWithSigner() {
-  // Check if MetaMask (window.ethereum) is injected into the browser
-  if (typeof window !== "undefined" && window.ethereum) {
-    // 1. Make sure we're signing against the local chain, not whatever network the wallet
-    // happens to be on - the user may have switched networks after connecting, so this can't
-    // only happen once at connect-time.
-    await switchToLocalNetwork();
-
-    // 2. Initialize BrowserProvider using the MetaMask object
-    const provider = new ethers.BrowserProvider(window.ethereum);
-
-    // 3. Request account access from the user and retrieve the Signer (the current active wallet)
-    const signer = await provider.getSigner();
-
-    // 4. Fetch the contract address from environment variables
-    const contractAddress = process.env.NEXT_PUBLIC_CONTRACT_ADDRESS;
-    if (!contractAddress) throw new Error("Missing contract address configuration");
-
-    // 5. Return the contract instance mapped directly to the active signer
-    return new ethers.Contract(contractAddress, contractData.abi, signer);
-  } else {
+/**
+ * Returns a signer for the connected wallet, for plain message-signing that doesn't need a
+ * contract instance at all (e.g. proving report authorship off-chain - see
+ * lib/report-signing.ts and the report submission flow on the app details page).
+ */
+export async function getEthereumSigner() {
+  if (typeof window === "undefined" || !window.ethereum) {
     throw new Error("MetaMask is not installed. Please install it to interact with the blockchain.");
   }
+  await switchToLocalNetwork();
+  const provider = new ethers.BrowserProvider(window.ethereum);
+  return provider.getSigner();
+}
+
+export async function getEthereumContractWithSigner() {
+  if (typeof window === "undefined" || !window.ethereum) {
+    throw new Error("MetaMask is not installed. Please install it to interact with the blockchain.");
+  }
+
+  // The user may have switched networks after connecting, so this can't only happen once at
+  // connect-time - every signing action needs to re-check.
+  await switchToLocalNetwork();
+
+  const provider = new ethers.BrowserProvider(window.ethereum);
+  const signer = await provider.getSigner();
+
+  const contractAddress = process.env.NEXT_PUBLIC_CONTRACT_ADDRESS;
+  if (!contractAddress) throw new Error("Missing contract address configuration");
+
+  return new ethers.Contract(contractAddress, contractData.abi, signer);
 }

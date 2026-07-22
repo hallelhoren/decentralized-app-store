@@ -18,6 +18,7 @@ contract DecentralizedAppStore {
         string[] tags;
         uint256 latestVersionId;
         bytes32 latestReviewsHash; // Anchor point for aggregated P2P reviews
+        bytes32 latestReportsHash; // Anchor point for aggregated P2P reports - same pattern
     }
 
     // State Variables
@@ -31,11 +32,11 @@ contract DecentralizedAppStore {
     // arbitrary UTF-8, so "MyApp" and "myapp" are treated as different names.
     mapping(bytes32 => bool) public isNameTaken;
 
-    // The address allowed to anchor aggregated review hashes (see updateReviews). This is the
-    // Next.js cache server's own on-chain identity, per the team's design: the cache server is
-    // untrusted for search/browse correctness (clients can always fall back to raw chain reads),
-    // but review aggregation specifically requires *a* known signer so that `apps[id]` cannot be
-    // overwritten by an arbitrary address. The owner can rotate this if the server's key changes.
+    // The address allowed to anchor aggregated review/report hashes and the Merkle root (see
+    // updateReviews, updateReports, updateMerkleRoot). The cache server is untrusted for
+    // search/browse correctness - clients can always fall back to raw chain reads - but these
+    // aggregation writes require a known signer so `apps[id]` can't be overwritten by an
+    // arbitrary address. The owner can rotate this if the server's key changes.
     address public owner;
     address public aggregator;
 
@@ -45,6 +46,12 @@ contract DecentralizedAppStore {
     // can act on.
     mapping(uint256 => uint256) public reportCount;
     mapping(uint256 => mapping(address => bool)) public hasReported;
+
+    // Root of a Merkle tree over the cache server's current app listing (see
+    // web-ui/src/lib/merkle.ts). A client reads this directly from the chain and verifies a
+    // proof against it, so search/browse results can be checked without trusting the cache
+    // server. The aggregator re-submits this whenever the underlying app data changes.
+    bytes32 public merkleRoot;
 
     // Events for Indexer and Sync Module (Next.js Cache Server)
     event AppPublished(
@@ -68,7 +75,17 @@ contract DecentralizedAppStore {
         uint256 indexed appId,
         bytes32 oldReviewsHash,
         bytes32 newReviewsHash,
-        string torrentRef, // Location of the new aggregated dataset in the P2P network
+        string torrentRef,
+        uint256 timestamp
+    );
+
+    // Reports use the same off-chain-aggregate-then-anchor-a-hash pattern as reviews (see
+    // updateReports): individual reasons are never stored on-chain, only a hash anchor.
+    event ReportsAggregated(
+        uint256 indexed appId,
+        bytes32 oldReportsHash,
+        bytes32 newReportsHash,
+        string torrentRef,
         uint256 timestamp
     );
 
@@ -81,6 +98,8 @@ contract DecentralizedAppStore {
     );
 
     event AggregatorChanged(address indexed previousAggregator, address indexed newAggregator);
+
+    event MerkleRootUpdated(bytes32 oldRoot, bytes32 newRoot, uint256 timestamp);
 
     // Modifiers
     modifier onlyPublisher(uint256 _appId) {
@@ -139,19 +158,20 @@ contract DecentralizedAppStore {
             name: _name,
             description: _description,
             tags: _tags,
-            latestVersionId: 1, // Fixed: Added missing comma
-            latestReviewsHash: bytes32(0)
+            latestVersionId: 1,
+            latestReviewsHash: bytes32(0),
+            latestReportsHash: bytes32(0)
         });
-        
+
         appVersions[newAppId][1] = Version({
             versionId: 1,
             torrentRef: _torrentRef,
             sha256Digest: _shaDigest,
             timestamp: block.timestamp
         });
-        
+
         versionCounts[newAppId] = 1;
-        
+
         emit AppPublished(newAppId, msg.sender, _name, _torrentRef, _shaDigest, block.timestamp);
     }
 
@@ -170,6 +190,38 @@ contract DecentralizedAppStore {
         apps[_appId].latestReviewsHash = _newReviewsHash;
 
         emit ReviewsAggregated(_appId, oldHash, _newReviewsHash, _torrentRef, block.timestamp);
+    }
+
+    /**
+     * @notice Updates the cryptographic report pointer using the same aggregation model as
+     * updateReviews - reports accumulate off-chain, and once enough pile up the full report
+     * history for this app is hashed and seeded, with only that hash anchored here.
+     * @param _appId The target application ID.
+     * @param _newReportsHash The recomputed hash representing the full current report history.
+     * @param _torrentRef The BitTorrent magnet link where the aggregated reports file is seeded.
+     */
+    function updateReports(
+        uint256 _appId,
+        bytes32 _newReportsHash,
+        string calldata _torrentRef
+    ) external onlyAggregator validApp(_appId) {
+        bytes32 oldHash = apps[_appId].latestReportsHash;
+        apps[_appId].latestReportsHash = _newReportsHash;
+
+        emit ReportsAggregated(_appId, oldHash, _newReportsHash, _torrentRef, block.timestamp);
+    }
+
+    /**
+     * @notice Anchors a new Merkle root over the cache server's current app listing, so a
+     * client can verify what the cache returns without trusting the cache itself - see
+     * web-ui/src/lib/merkle.ts for tree construction and proof verification.
+     * @param _newRoot The recomputed root over the current set of apps.
+     */
+    function updateMerkleRoot(bytes32 _newRoot) external onlyAggregator {
+        bytes32 oldRoot = merkleRoot;
+        merkleRoot = _newRoot;
+
+        emit MerkleRootUpdated(oldRoot, _newRoot, block.timestamp);
     }
 
     /**
@@ -193,16 +245,16 @@ contract DecentralizedAppStore {
     ) external onlyPublisher(_appId) {
         versionCounts[_appId]++;
         uint256 newVersionId = versionCounts[_appId];
-        
+
         appVersions[_appId][newVersionId] = Version({
             versionId: newVersionId,
             torrentRef: _torrentRef,
             sha256Digest: _shaDigest,
             timestamp: block.timestamp
         });
-        
+
         apps[_appId].latestVersionId = newVersionId;
-        
+
         emit VersionPublished(_appId, newVersionId, _torrentRef, _shaDigest, block.timestamp);
     }
 

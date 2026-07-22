@@ -46,11 +46,18 @@ export class BitTorrentManager {
   async downloadFile(
     magnetLink: string,
     savePath: string,
-    onDone?: (filePaths: string[]) => void
+    onDone?: (filePaths: string[]) => void,
+    onError?: (err: Error) => void,
+    timeoutMs: number = 15000
   ): Promise<string> {
     if (!this.client) {
       throw new Error('BitTorrent client not initialized. Call initialize() first.');
     }
+
+    // Declared outside the try block so both the timeout callback and the catch clause below
+    // can share and cancel the same timer, regardless of which path settles the promise first.
+    let settled = false;
+    let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
 
     return new Promise((resolve, reject) => {
       try {
@@ -59,7 +66,28 @@ export class BitTorrentManager {
           fs.mkdirSync(dir, { recursive: true });
         }
 
+        // A malformed magnet link (or one whose metadata never resolves via DHT/trackers
+        // within a reasonable window) can leave this callback never firing at all - without
+        // this, the promise would hang forever and so would every caller awaiting it. Only
+        // guards the metadata-resolution step below; once we have a real torrent object, the
+        // existing 'done'/'error' handling takes over.
+        timeoutHandle = setTimeout(() => {
+          if (settled) return;
+          settled = true;
+          reject(new Error(`Timed out after ${timeoutMs}ms waiting for torrent metadata to resolve (magnetLink=${magnetLink})`));
+        }, timeoutMs);
+
         this.client!.add(magnetLink, { path: dir }, (torrent) => {
+          if (settled) {
+            // Metadata resolved after we already gave up and rejected - don't act on it as if
+            // this were still the caller's in-flight request; just drop it from the client so
+            // it doesn't keep seeding/downloading on behalf of a caller that's moved on.
+            this.client!.remove(torrent, { destroyStore: false }, () => {});
+            return;
+          }
+          settled = true;
+          clearTimeout(timeoutHandle);
+
           const torrentId = torrent.infoHash;
           this.torrents.set(torrentId, torrent);
 
@@ -89,12 +117,15 @@ export class BitTorrentManager {
             });
           }, 1000);
 
+          // client.add() can dedupe onto an already-registered torrent (e.g. one this same
+          // process is seeding) whose 'done' event already fired in the past, so guard against
+          // handling completion twice.
           let doneHandled = false;
           const handleDone = () => {
-            if (doneHandled) return; // client.add() can dedupe onto an already-registered
-            doneHandled = true;      // torrent (e.g. one this same process is seeding) whose
-            clearInterval(progressInterval); // 'done' event already fired in the past - guard
-            console.log(`[${torrentId}] Download completed`);             // against double-fire.
+            if (doneHandled) return;
+            doneHandled = true;
+            clearInterval(progressInterval);
+            console.log(`[${torrentId}] Download completed`);
 
             this.progressMap.set(torrentId, {
               id: torrentId,
@@ -107,8 +138,21 @@ export class BitTorrentManager {
 
             // torrent.path is the directory WebTorrent actually stored the data under - for a
             // fresh download that's `dir`, but if this torrent already existed in the client
-            // (e.g. this process is also seeding it), it's wherever *that* copy lives instead.
-            const filePaths = torrent.files.map((f) => path.join(torrent.path, f.path));
+            // (e.g. this same process is also seeding it, which is the common case when
+            // testing upload+download on one machine), it's wherever *that* copy lives instead
+            // - meaning nothing would ever actually land in the app's own download folder,
+            // even though verification correctly reports success against the real file. Copy
+            // into `dir` explicitly whenever the source isn't already there, so a completed
+            // download always leaves a real, discoverable file at the expected location.
+            const filePaths = torrent.files.map((f) => {
+              const sourcePath = path.join(torrent.path, f.path);
+              const destPath = path.join(dir, f.path);
+              if (path.resolve(sourcePath) !== path.resolve(destPath)) {
+                fs.mkdirSync(path.dirname(destPath), { recursive: true });
+                fs.copyFileSync(sourcePath, destPath);
+              }
+              return destPath;
+            });
             onDone?.(filePaths);
           };
 
@@ -121,12 +165,20 @@ export class BitTorrentManager {
             console.error(`[${torrentId}] Torrent error:`, err);
             this.torrents.delete(torrentId);
             this.progressMap.delete(torrentId);
+            // By the time a real torrent error fires, downloadFile()'s promise has almost
+            // always already resolved (resolve() runs synchronously right after this listener
+            // is attached, inside the same client.add() callback) - so reject() below only
+            // catches the rare case where this fires before that. The caller relies on
+            // onError to learn about failures that happen after it already got a torrentId.
+            onError?.(err instanceof Error ? err : new Error(String(err)));
             reject(err);
           });
 
           resolve(torrentId);
         });
       } catch (error) {
+        settled = true;
+        clearTimeout(timeoutHandle);
         reject(error);
       }
     });
@@ -184,21 +236,28 @@ export class BitTorrentManager {
   }
 
   /**
-   * Stop seeding or downloading a torrent
+   * Stop seeding or downloading a torrent. Resolves once WebTorrent has actually finished
+   * tearing it down (and released any open file handles under its save path) - callers that
+   * need to delete that save path right after removal should await this first.
    */
-  removeTorrent(torrentId: string): void {
-    const torrent = this.torrents.get(torrentId);
-    if (torrent) {
+  removeTorrent(torrentId: string): Promise<void> {
+    return new Promise((resolve) => {
+      const torrent = this.torrents.get(torrentId);
+      if (!torrent) {
+        resolve();
+        return;
+      }
       this.client!.remove(torrent, { destroyStore: false }, (err) => {
         if (err) {
           console.error(`Error removing torrent ${torrentId}:`, err);
         } else {
           console.log(`Torrent ${torrentId} removed`);
         }
+        this.torrents.delete(torrentId);
+        this.progressMap.delete(torrentId);
+        resolve();
       });
-      this.torrents.delete(torrentId);
-      this.progressMap.delete(torrentId);
-    }
+    });
   }
 
   /**

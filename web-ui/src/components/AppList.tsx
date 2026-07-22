@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { Badge, Card, SimpleGrid, Text, Title } from "@mantine/core";
+import { Avatar, Badge, Card, Group, SimpleGrid, Text, Title } from "@mantine/core";
 import RatingStars from "./RatingStars";
 
 export interface AppVersion {
@@ -9,6 +9,7 @@ export interface AppVersion {
   torrentRef: string;
   sha256Digest: string;
   publishedAt: string;
+  releaseNotes: string | null;
 }
 
 // Shape returned by GET /api/apps (a Prisma App row + its versions), which mirrors the
@@ -19,11 +20,14 @@ export interface AppData {
   description: string;
   category: string;
   tags: string[];
+  icon: string | null;
   rating: number;
   ratingCount: number;
   reportCount: number;
+  downloadCount: number;
   version: string;
   publisher: string;
+  publisherName: string | null;
   versions: AppVersion[];
 }
 
@@ -55,9 +59,14 @@ export default function AppList({ apps, hrefBase, emptyMessage = "No apps to sho
           withBorder
           style={{ textDecoration: "none", color: "inherit" }}
         >
-          <Badge variant="light" color="brand" mb="sm">
-            {app.category}
-          </Badge>
+          <Group gap="sm" mb="sm">
+            <Avatar src={app.icon ?? undefined} radius="xl" size="md">
+              {app.name[0]?.toUpperCase()}
+            </Avatar>
+            <Badge variant="light" color="brand">
+              {app.category}
+            </Badge>
+          </Group>
           <Title order={4} mb={4}>
             {app.name}
           </Title>
@@ -65,6 +74,9 @@ export default function AppList({ apps, hrefBase, emptyMessage = "No apps to sho
             {app.description}
           </Text>
           <RatingStars value={app.rating} count={app.ratingCount} />
+          <Text c="dimmed" size="xs" mt={4}>
+            ⬇ {app.downloadCount} download{app.downloadCount === 1 ? "" : "s"}
+          </Text>
         </Card>
       ))}
     </SimpleGrid>
