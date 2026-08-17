@@ -1,6 +1,10 @@
 import * as crypto from 'crypto';
 import * as fs from 'fs';
 
+// Part of Module C from the HLD (Desktop P2P Client): the security layer that guarantees a
+// downloaded binary matches the SHA-256 digest anchored on-chain, independent of whether the
+// P2P network or the cache server is trustworthy.
+
 export class HashVerifier {
   /**
    * Calculate SHA-256 hash of a file

@@ -2,6 +2,10 @@ import WebTorrent from 'webtorrent';
 import * as fs from 'fs';
 import * as path from 'path';
 
+// Part of Module C from the HLD (Desktop P2P Client): wraps WebTorrent for seeding/downloading
+// application binaries. HashVerifier (in this same directory) is what actually checks a
+// downloaded file's integrity against the chain - this class only handles P2P transfer.
+
 export interface TorrentProgress {
   id: string;
   progress: number;

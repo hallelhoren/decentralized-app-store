@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
+// Module A from the HLD (Smart Contract Layer): the system's immutable source of truth for app
+// metadata, ownership, and version history. Binary content and full review/report text live
+// off-chain (BitTorrent + Postgres, see web-ui/); only hashes and torrent references are
+// anchored here, so a client never has to trust the cache server for integrity.
 contract DecentralizedAppStore {
 
     struct Version {

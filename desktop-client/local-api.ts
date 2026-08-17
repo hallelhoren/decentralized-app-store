@@ -8,6 +8,10 @@ import * as crypto from 'crypto';
 import BitTorrentManager from './BitTorrentManager';
 import HashVerifier from './HashVerifier';
 
+// The only interface the web UI has into Module C (Desktop P2P Client): a local Express API
+// (default port 3001, see DESKTOP_API_PORT) exposing /api/download, /api/status, and /api/upload
+// over BitTorrentManager + HashVerifier. See web-ui/src/lib/desktop-client.ts for the caller side.
+
 const app = express();
 app.use(cors());
 app.use(express.json());
